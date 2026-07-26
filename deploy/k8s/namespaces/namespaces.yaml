@@ -1,0 +1,29 @@
+# Namespaces, matching the deployment diagram in the architecture document.
+#
+# The split is not cosmetic: NetworkPolicies select on namespace labels, so
+# "the data layer" and "observability" have to be real boundaries for the policies to
+# express anything.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: arcadia-app
+  labels:
+    kubernetes.io/metadata.name: arcadia-app
+    arcadia.io/tier: application
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: arcadia-data
+  labels:
+    kubernetes.io/metadata.name: arcadia-data
+    arcadia.io/tier: data
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    kubernetes.io/metadata.name: observability
+    arcadia.io/tier: observability

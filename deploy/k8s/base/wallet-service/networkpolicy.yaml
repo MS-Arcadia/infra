@@ -1,0 +1,85 @@
+# Network policy: default-deny, then allow exactly what the service needs.
+#
+# This is the "NetworkPolicy for east-west traffic" note in the deployment section of the
+# architecture document. Its practical effect is that a compromised Community pod cannot
+# reach the wallet's database or its gRPC port, because nothing is reachable unless it is
+# named here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wallet-service
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: wallet-service
+  policyTypes: [Ingress, Egress]
+
+  ingress:
+    # The API gateway, for user-facing requests.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: api-gateway
+      ports:
+        - protocol: TCP
+          port: 9090
+    # The Store and Marketplace services, which drive the sagas.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: store-service
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: marketplace-service
+      ports:
+        - protocol: TCP
+          port: 9090
+    # Prometheus, for /metrics.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 8080
+
+  egress:
+    # DNS. Omitting this is the single most common NetworkPolicy mistake: everything
+    # fails with a name-resolution error that looks like a broken service.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The data layer.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: arcadia-data
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 9092
+    # The Payment Adapter.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: payment-service
+      ports:
+        - protocol: TCP
+          port: 9091
+    # The telemetry collector.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 4317

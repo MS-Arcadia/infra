@@ -1,0 +1,67 @@
+# Grafana datasources, provisioned so the stack is useful the moment it starts.
+#
+# The interesting parts are the correlations at the bottom of each entry. They are what
+# turn three separate tools into one investigation path: a slow request in Prometheus
+# leads to its traces in Tempo, a span in Tempo leads to the log lines it produced in
+# Loki, and a log line's trace_id leads back to the trace. Without them a correlation id
+# is just a string somebody has to copy and paste.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      # Lets a metric point link straight to an example trace that produced it.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # Every service logs trace_id as a structured field, so a log line can jump to its
+      # trace.
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"(\w+)"'
+          url: '$${__value.raw}'
+          datasourceUid: tempo
+        - name: CorrelationID
+          matcherRegex: '"correlation_id":"([^"]+)"'
+          # Not a link: a correlation id spans several traces, so it is used as a search
+          # term in Loki rather than a jump to one trace.
+          url: ''
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      # From a span, find the logs that span emitted.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        filterByTraceID: true
+        filterBySpanID: false
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        queries:
+          - name: 'Request rate'
+            query: 'sum(rate(arcadia_rpc_requests_total{$$__tags}[5m]))'
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true

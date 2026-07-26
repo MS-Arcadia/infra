@@ -1,0 +1,134 @@
+# Wallet service Deployment.
+#
+# Everything here that looks like ceremony is load-bearing. The notes explain which
+# failure each setting prevents, because a manifest without that context is one somebody
+# will "simplify" during an incident.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  labels:
+    app.kubernetes.io/name: payment-service
+    app.kubernetes.io/part-of: arcadia
+    app.kubernetes.io/component: generic
+spec:
+  # Two replicas minimum. The bank callback endpoint must stay reachable through a
+  # rolling update: a provider that gets a connection refused may not retry, and the
+  # payment would then only be recovered by the reconciliation sweeper minutes later.
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never take capacity below the desired count during a roll. A wallet service that
+      # is briefly absent stalls every purchase saga in flight.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payment-service
+        app.kubernetes.io/part-of: arcadia
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: payment-service
+      # terminationGracePeriodSeconds must exceed the service's own shutdown budget
+      # (SHUTDOWN_TIMEOUT plus the pre-stop drain pause), or Kubernetes SIGKILLs the
+      # process mid-transaction.
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # Spread replicas across nodes so a single node failure cannot take the whole
+      # service with it.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: payment-service
+      containers:
+        - name: payment-service
+          image: ghcr.io/ms-arcadia/payment-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+            - name: grpc
+              containerPort: 9091
+          envFrom:
+            - configMapRef:
+                name: payment-service-config
+            - secretRef:
+                name: payment-service-secrets
+          env:
+            - name: SERVICE_VERSION
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['app.kubernetes.io/version']
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              # Requests are what the scheduler reserves; keep them close to steady-state
+              # usage so the cluster is not systematically over-committed.
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              # No CPU limit on purpose: throttling a service that holds database row
+              # locks turns a latency spike into lock contention across the platform.
+              # Memory is limited, because a leak must be killed rather than allowed to
+              # evict its neighbours.
+              memory: 512Mi
+          # Migrations run at boot, so the first readiness probe may legitimately take a
+          # while. startupProbe gives it room without loosening liveness afterwards.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 40
+          livenessProbe:
+            # /livez deliberately probes nothing. A database blip must not get the pod
+            # killed — restarting would not fix Postgres and would throw away in-flight
+            # work. That is readiness's job.
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              exec:
+                # The service withdraws readiness on SIGTERM itself; this pause gives the
+                # endpoints controller time to notice before the listeners close, which is
+                # what stops a rolling update from dropping in-flight requests.
+                command: ["/bin/sh", "-c", "sleep 5"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

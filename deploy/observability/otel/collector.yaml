@@ -1,0 +1,110 @@
+# OpenTelemetry Collector.
+#
+# Every service exports here over OTLP and nowhere else. That indirection is the point:
+# the storage backends behind this file can be replaced — Prometheus for Mimir, Loki for
+# something else — without redeploying a single service. It is the Maintainability
+# tactic from the architecture document made concrete.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Scrapes the services' own Prometheus endpoints. Metrics reach Prometheus two ways —
+  # pushed through OTLP and scraped here — because the Go runtime and process collectors
+  # are only exposed on /metrics.
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: arcadia-services
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['wallet-service:8080', 'payment-service:8081']
+
+processors:
+  # Batching is what keeps export cheap: without it every span is its own request.
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+    send_batch_max_size: 1024
+
+  # A hard ceiling so a burst of telemetry cannot push the collector into an OOM kill
+  # and take the pipeline down with it.
+  memory_limiter:
+    check_interval: 2s
+    limit_mib: 384
+    spike_limit_mib: 96
+
+  # Stamps the container's identity onto every signal, so a metric can be traced back to
+  # the instance that emitted it.
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 5s
+
+  # Drops attributes that would explode label cardinality. A wallet id on a metric would
+  # create one time series per user, which is how a Prometheus instance dies.
+  attributes/scrub:
+    actions:
+      - key: wallet_id
+        action: delete
+      - key: user_id
+        action: delete
+      - key: idempotency_key
+        action: delete
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Keeps the resource attributes (service, version, environment) as labels.
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  prometheusremotewrite:
+    endpoint: http://prometheus:9090/api/v1/write
+    tls:
+      insecure: true
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
+  # Uncomment to see what the collector is receiving while debugging the pipeline.
+  # debug:
+  #   verbosity: detailed
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      # memory_limiter first: it must be able to reject work before anything else spends
+      # memory on it.
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlp/tempo]
+
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, resourcedetection, attributes/scrub, batch]
+      exporters: [prometheusremotewrite]
+
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlphttp/loki]
+
+  telemetry:
+    logs:
+      level: info

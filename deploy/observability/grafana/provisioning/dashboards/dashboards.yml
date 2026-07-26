@@ -1,0 +1,15 @@
+apiVersion: 1
+
+providers:
+  - name: Arcadia
+    orgId: 1
+    folder: Arcadia
+    type: file
+    disableDeletion: false
+    # Allows editing in the UI while still reloading from disk, which is how a dashboard
+    # gets iterated on locally and then committed.
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

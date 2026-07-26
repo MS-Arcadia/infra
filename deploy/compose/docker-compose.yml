@@ -1,0 +1,374 @@
+# Arcadia local platform.
+#
+# Brings up the data layer, the event backbone, the observability stack and the two
+# services that exist so far. Run it from this directory:
+#
+#   cp .env.example .env
+#   docker compose up -d
+#
+# Profiles keep the footprint honest. `docker compose up -d` starts what you need to
+# exercise the wallet and payment services; the observability stack is opt-in:
+#
+#   docker compose --profile observability up -d
+#
+# Everything binds to localhost only. None of these credentials are secrets — they are
+# development defaults, and the compose file is the one place they are allowed to appear.
+
+name: arcadia
+
+# ---------------------------------------------------------------------------
+# Shared fragments
+# ---------------------------------------------------------------------------
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  logging: *default-logging
+  networks: [arcadia]
+
+x-go-service-env: &go-service-env
+  ENVIRONMENT: local
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  LOG_FORMAT: json
+  # A single shared secret for local development. The Auth service will sign tokens with
+  # it, and the Postman collection mints one with the same value.
+  JWT_ALGORITHM: HS256
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_ISSUER: arcadia-auth
+  JWT_AUDIENCE: arcadia
+  KAFKA_ENABLED: "true"
+  KAFKA_BROKERS: kafka:9092
+  OTEL_ENABLED: ${OTEL_ENABLED:-false}
+  OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+  OTEL_EXPORTER_OTLP_INSECURE: "true"
+
+services:
+  # -------------------------------------------------------------------------
+  # Data layer
+  # -------------------------------------------------------------------------
+
+  postgres:
+    <<: *service-defaults
+    image: postgres:16-alpine
+    container_name: arcadia-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-arcadia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-arcadia}
+      # The bootstrap database. Per-service databases are created by the init script,
+      # each with its own role and no access to the others.
+      POSTGRES_DB: arcadia
+      # C collation makes index behaviour deterministic across host platforms, which
+      # matters when a developer on macOS and CI on Linux must agree.
+      POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8 --locale=C"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Runs once, on first boot of an empty data directory.
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+    command:
+      # Modest but deliberate tuning for a laptop. The important one is
+      # max_connections: fourteen services with pools of twenty would exhaust the
+      # default of 100 long before the platform is fully built.
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=8MB
+      # Log anything slower than 500ms. On a laptop this is how an accidentally
+      # unindexed query gets noticed before it reaches a review.
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_lock_waits=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-arcadia} -d arcadia"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    <<: *service-defaults
+    image: redis:7-alpine
+    container_name: arcadia-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command:
+      # appendonly keeps the gift-card abuse windows across a restart. Losing them would
+      # hand an attacker a clean slate every time the container bounced.
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 256mb
+      # Rate-limit windows and locks are all keyed with a TTL, so evicting the
+      # least-recently-used volatile key is the correct pressure valve.
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # -------------------------------------------------------------------------
+  # Event backbone
+  # -------------------------------------------------------------------------
+
+  kafka:
+    <<: *service-defaults
+    image: bitnami/kafka:3.7
+    container_name: arcadia-kafka
+    ports:
+      # 9092 is the in-network listener; 29092 is how a client on the host reaches it.
+      - "${KAFKA_PORT:-29092}:29092"
+    environment:
+      # KRaft mode: no ZooKeeper. One less container and one less thing to explain.
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      # Two advertised listeners because in-cluster clients and host clients reach the
+      # broker by different names. Getting this wrong is the classic "works from the
+      # container, times out from my laptop" Kafka failure.
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Auto-creation is off on purpose. Each service declares the topics it owns at
+      # boot, so a typo in a topic name fails loudly instead of silently creating a
+      # topic nobody consumes.
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # Single broker, so nothing can be replicated further than one.
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_NUM_PARTITIONS: "3"
+      # A short rebalance delay makes local restarts feel instant instead of stalling
+      # for the three-second production default.
+      KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_HEAP_OPTS: "-Xmx768m -Xms512m"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    volumes:
+      - kafka-data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  kafka-ui:
+    <<: *service-defaults
+    image: provectuslabs/kafka-ui:latest
+    container_name: arcadia-kafka-ui
+    profiles: [tools]
+    ports:
+      - "${KAFKA_UI_PORT:-8085}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: arcadia
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # -------------------------------------------------------------------------
+  # Application services
+  # -------------------------------------------------------------------------
+
+  wallet-service:
+    <<: *service-defaults
+    container_name: arcadia-wallet
+    build:
+      # The context is the repository root's parent, because the service's Dockerfile
+      # copies the shared platform module out of the infra repository.
+      context: ../../..
+      dockerfile: wallet-service/Dockerfile
+      args:
+        VERSION: ${WALLET_VERSION:-local}
+    image: ghcr.io/ms-arcadia/wallet-service:${WALLET_VERSION:-local}
+    ports:
+      - "${WALLET_HTTP_PORT:-8080}:8080"
+      - "${WALLET_GRPC_PORT:-9090}:9090"
+    environment:
+      <<: *go-service-env
+      SERVICE_NAME: wallet-service
+      # Both transports locally: gRPC for other services, REST for the Postman
+      # collection and the Next.js front end.
+      SERVER_MODE: both
+      HTTP_ADDR: ":8080"
+      GRPC_ADDR: ":9090"
+      DATABASE_URL: postgres://wallet_user:wallet_pass@postgres:5432/arcadia_wallet?sslmode=disable
+      REDIS_ENABLED: "true"
+      REDIS_ADDR: redis:6379
+      KAFKA_GROUP_ID: wallet-service
+      PAYMENT_SERVICE_GRPC: payment-service:9091
+      WALLET_CURRENCY: ${WALLET_CURRENCY:-IRR}
+      GIFT_CARD_PEPPER: ${GIFT_CARD_PEPPER}
+      # 5% a year, credited daily, on balances of 1000.00 and above.
+      INTEREST_ENABLED: "true"
+      INTEREST_ANNUAL_RATE_BPS: "500"
+      INTEREST_MIN_BALANCE_MINOR: "100000"
+      # The thresholds from the requirements: five wrong gift-card codes a minute,
+      # thirty an hour, flagged for Support review at ten.
+      GIFTCARD_ABUSE_PER_MINUTE: "5"
+      GIFTCARD_ABUSE_PER_HOUR: "30"
+      GIFTCARD_ABUSE_FLAG_AT: "10"
+      # Short intervals locally so a reviewer sees the jobs actually run.
+      JOB_RECONCILE_INTERVAL: 2m
+      JOB_INTEREST_INTERVAL: 10m
+      JOB_HOLD_SWEEP_INTERVAL: 1m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      # wget rather than curl: the distroless image has neither, so this runs from the
+      # host's perspective via the container's own network namespace only when a shell
+      # exists. It is intentionally lenient — Kubernetes owns the real probes.
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 30s
+
+  payment-service:
+    <<: *service-defaults
+    container_name: arcadia-payment
+    build:
+      context: ../../..
+      dockerfile: payment-service/Dockerfile
+      args:
+        VERSION: ${PAYMENT_VERSION:-local}
+    image: ghcr.io/ms-arcadia/payment-service:${PAYMENT_VERSION:-local}
+    ports:
+      - "${PAYMENT_HTTP_PORT:-8081}:8081"
+      - "${PAYMENT_GRPC_PORT:-9091}:9091"
+    environment:
+      <<: *go-service-env
+      SERVICE_NAME: payment-service
+      HTTP_ADDR: ":8081"
+      GRPC_ADDR: ":9091"
+      DATABASE_URL: postgres://payment_user:payment_pass@postgres:5432/arcadia_payment?sslmode=disable
+      KAFKA_TOPIC_PAYMENT_EVENTS: payment-events
+      # The sandbox provider, so the whole top-up flow works with no bank account. Its
+      # authorisation page is served at /mock-bank/pay.
+      GATEWAY_KIND: mock
+      GATEWAY_CALLBACK_SECRET: ${GATEWAY_CALLBACK_SECRET}
+      PAYMENT_CURRENCY: ${WALLET_CURRENCY:-IRR}
+      # Must be reachable by the "bank", which here is a browser on the host.
+      PUBLIC_BASE_URL: http://localhost:${PAYMENT_HTTP_PORT:-8081}
+      DEFAULT_RETURN_URL: http://localhost:3000/wallet
+      JOB_SWEEP_INTERVAL: 1m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # -------------------------------------------------------------------------
+  # Observability (profile: observability)
+  # -------------------------------------------------------------------------
+
+  otel-collector:
+    <<: *service-defaults
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    container_name: arcadia-otel-collector
+    profiles: [observability]
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ../observability/otel/collector.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    depends_on: [prometheus, loki, tempo]
+
+  prometheus:
+    <<: *service-defaults
+    image: prom/prometheus:v3.0.1
+    container_name: arcadia-prometheus
+    profiles: [observability]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      # Required so the collector can push metrics in rather than only being scraped.
+      - --web.enable-remote-write-receiver
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9095}:9090"
+
+  loki:
+    <<: *service-defaults
+    image: grafana/loki:3.3.2
+    container_name: arcadia-loki
+    profiles: [observability]
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ../observability/loki/config.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+
+  tempo:
+    <<: *service-defaults
+    image: grafana/tempo:2.6.1
+    container_name: arcadia-tempo
+    profiles: [observability]
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    volumes:
+      - ../observability/tempo/config.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "${TEMPO_PORT:-3200}:3200"
+
+  grafana:
+    <<: *service-defaults
+    image: grafana/grafana:11.4.0
+    container_name: arcadia-grafana
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Skips the login screen for a local stack. Never do this anywhere reachable.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      # Enables the trace-to-logs and logs-to-traces links, which is what makes a
+      # correlation id in a log line clickable through to its trace.
+      GF_FEATURE_TOGGLES_ENABLE: traceToMetrics
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on: [prometheus, loki, tempo]
+
+networks:
+  arcadia:
+    name: arcadia
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:

@@ -1,0 +1,25 @@
+# Local configuration. .env.example is committed; .env is not.
+deploy/compose/.env
+deploy/compose/.env.local
+
+# Rendered manifests. `make k8s-build` output is transient; the kustomize sources are
+# what is reviewed.
+deploy/k8s/**/rendered.yaml
+
+# Real secrets. The committed Secret manifests hold obvious placeholders; anything
+# sealed or decrypted stays local.
+deploy/k8s/**/*.secret.yaml
+deploy/k8s/**/secrets.enc.yaml
+
+# Go build output from the platform module
+platform/bin/
+platform/coverage.out
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+go.work
+go.work.sum

@@ -1,0 +1,432 @@
+{
+  "uid": "arcadia-wallet-payments",
+  "title": "Arcadia — Wallet & Payments",
+  "description": "The SLOs from the architecture document. Top row is the health of the money path: if any of those four panels is not what it should be, something is wrong with a user's balance.",
+  "tags": ["arcadia", "wallet", "payments", "slo"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(arcadia_rpc_requests_total, service)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Financial integrity",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "Ledger mismatches",
+      "description": "Wallets whose stored balance does not equal the sum of their ledger. This must be zero. Anything else is a P1: the ledger is the source of truth and the two have diverged.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        { "refId": "A", "expr": "sum(arcadia_ledger_mismatch_count)", "legendFormat": "mismatches" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Dead-lettered events",
+      "description": "Messages that could not be processed and were parked for an operator. The SLO target is zero — each one is a business operation that did not happen.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(arcadia_events_dead_lettered_total[1h])) or vector(0)", "legendFormat": "last hour" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Failed outbox rows",
+      "description": "Events committed with their state change but never published. Something downstream believes the world is in an older state than it is.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "targets": [
+        { "refId": "A", "expr": "sum(arcadia_outbox_backlog{status=\"failed\"})", "legendFormat": "failed" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Oldest unpublished event",
+      "description": "How far behind the outbox dispatcher is. A steady rise means the dispatcher is stuck rather than busy; the events are durable, but every consumer is falling behind.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "targets": [
+        { "refId": "A", "expr": "max(arcadia_outbox_oldest_pending_age_seconds)", "legendFormat": "age" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 120 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Request path (RED)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Request rate by method",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (method) (rate(arcadia_rpc_requests_total{service=~\"$service\"}[5m]))",
+          "legendFormat": "{{method}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency percentiles",
+      "description": "The objective is a p95 under 300ms for reads. The threshold line is drawn at 0.3s.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(arcadia_rpc_duration_seconds_bucket{service=~\"$service\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(arcadia_rpc_duration_seconds_bucket{service=~\"$service\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(arcadia_rpc_duration_seconds_bucket{service=~\"$service\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 0,
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.3 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Error rate",
+      "description": "The objective is under 0.1%. A sustained 1% pages on-call.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (rate(arcadia_rpc_requests_total{service=~\"$service\", code!~\"OK|2..|3..\"}[5m])) / sum by (service) (rate(arcadia_rpc_requests_total{service=~\"$service\"}[5m]))",
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "fillOpacity": 10, "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.01 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Business rule rejections",
+      "description": "Not errors. INSUFFICIENT_FUNDS is the system working correctly; a sudden change in the mix is worth understanding.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (rule) (rate(arcadia_business_rule_rejections_total[5m]))",
+          "legendFormat": "{{rule}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+    },
+    {
+      "type": "row",
+      "title": "Money movement",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Value moved by reason",
+      "description": "In minor currency units. A business view rather than an operational one, but it is the fastest way to see that purchases stopped.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (rate(arcadia_money_moved_minor_total[5m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Wallet operations by outcome",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation, outcome) (rate(arcadia_wallet_operations_total[5m]))",
+          "legendFormat": "{{operation}} — {{outcome}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Idempotent replays",
+      "description": "Requests recognised as retries of an earlier call. A healthy number means clients retry and the guard works; a spike means something upstream is retrying hard.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 32 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation) (rate(arcadia_idempotent_replays_total[5m]))",
+          "legendFormat": "{{operation}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Gift card attempts throttled",
+      "description": "Redemptions refused by the abuse limiter. Individual users are flagged for Support automatically; this shows the platform-wide picture that no single account's counters would reveal.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 32 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (limiter) (rate(arcadia_rate_limit_blocks_total[5m]))",
+          "legendFormat": "{{limiter}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20 } } }
+    },
+    {
+      "type": "row",
+      "title": "Event pipeline",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Consumer lag",
+      "description": "The SLO threshold is 1000 messages. A steady climb means a handler cannot keep up or a partition is stuck.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 40 },
+      "targets": [
+        { "refId": "A", "expr": "arcadia_kafka_consumer_lag", "legendFormat": "{{topic}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 10, "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1000 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox throughput",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 40 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (topic) (rate(arcadia_outbox_published_total[5m]))",
+          "legendFormat": "published — {{topic}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (topic) (rate(arcadia_outbox_publish_failures_total[5m]))",
+          "legendFormat": "failed — {{topic}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Event handling duration",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 40 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (event_type, le) (rate(arcadia_event_handling_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 — {{event_type}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 0 } } }
+    },
+    {
+      "type": "row",
+      "title": "Bank gateway",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 47 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway latency",
+      "description": "The bank is an external dependency and routinely takes seconds. What matters is the tail: a p95 above ten seconds means top-ups are timing out for users.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 48 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (gateway, operation, le) (rate(arcadia_payment_gateway_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 — {{gateway}} {{operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 0, "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Payment outcomes",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 48 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation, outcome) (rate(arcadia_payment_operations_total[5m]))",
+          "legendFormat": "{{operation}} — {{outcome}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Callbacks rejected",
+      "description": "A trickle is noise. A sustained stream of signature failures is somebody probing the one unauthenticated write path in the platform.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 48 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (rate(arcadia_payment_callbacks_rejected_total[5m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+    }
+  ]
+}
