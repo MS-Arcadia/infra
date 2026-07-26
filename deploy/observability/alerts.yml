@@ -1,0 +1,94 @@
+# Alert rules.
+#
+# Deliberately short. The severity split is the point: `page` wakes somebody up,
+# `ticket` waits for business hours. Only things that mean money was lost, or that the
+# ledger no longer adds up, page — an alert set where everything is urgent trains people
+# to ignore all of it.
+
+groups:
+  - name: arcadia-financial-integrity
+    rules:
+      - alert: LedgerMismatch
+        # The reconciliation job compares each wallet's balance against the sum of its
+        # ledger. Anything but zero means the two disagree: either a bug wrote a balance
+        # without an entry, or somebody edited the database by hand.
+        expr: arcadia_ledger_mismatch_count > 0
+        labels: { severity: page }
+        annotations:
+          summary: "Ledger mismatch on {{ $labels.service }} ({{ $value }} wallets)"
+          runbook: docs/runbooks/ledger-mismatch.md
+
+      - alert: EventsDeadLettered
+        # Each dead-lettered message is a business operation that did not happen.
+        expr: increase(arcadia_events_dead_lettered_total[10m]) > 0
+        labels: { severity: page }
+        annotations:
+          summary: "Events dead-lettered on {{ $labels.topic }}"
+
+      - alert: OutboxStalled
+        # Events are durable, so nothing is lost — but every consumer is now behind.
+        expr: arcadia_outbox_oldest_pending_age_seconds > 120
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "The outbox on {{ $labels.service }} is not draining"
+
+      - alert: OutboxPermanentlyFailed
+        expr: arcadia_outbox_backlog{status="failed"} > 0
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $value }} outbox messages need an operator on {{ $labels.service }}"
+
+      - alert: PaymentAmountMismatch
+        # A settlement disagreeing with its intent was refused, so no wallet was
+        # credited. Check GATEWAY_CURRENCY_DIVISOR before assuming an attack.
+        expr: increase(arcadia_payment_callbacks_rejected_total{reason="PAYMENT_AMOUNT_MISMATCH"}[15m]) > 0
+        labels: { severity: page }
+        annotations:
+          summary: "A payment reported an amount that did not match its intent"
+
+  - name: arcadia-service-health
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"wallet-service|payment-service"} == 0
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.job }} is not responding"
+
+      - alert: HighErrorRate
+        # The objective is under 0.1%; this fires at 1%, the "actually broken" threshold.
+        expr: |
+          sum by (service) (rate(arcadia_rpc_requests_total{code!~"OK|2..|3.."}[5m]))
+            / sum by (service) (rate(arcadia_rpc_requests_total[5m])) > 0.01
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.service }} is failing {{ $value | humanizePercentage }} of requests"
+
+      - alert: LatencyBudgetExceeded
+        # The objective is a p95 under 300ms; alerting at 500ms leaves room for variance.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (service, le) (rate(arcadia_rpc_duration_seconds_bucket[5m]))) > 0.5
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "{{ $labels.service }} p95 is {{ $value | humanizeDuration }}"
+
+      - alert: ConsumerLagGrowing
+        expr: arcadia_kafka_consumer_lag > 1000
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "Consumer lag on {{ $labels.topic }} is {{ $value }}"
+
+      - alert: GiftCardProbing
+        # Individual users are already flagged for Support review by the service itself;
+        # this catches a distributed attempt no single account's counters would show.
+        expr: increase(arcadia_rate_limit_blocks_total{limiter="giftcard-attempt"}[10m]) > 50
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "Elevated gift card guessing across the platform"

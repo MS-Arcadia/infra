@@ -1,0 +1,98 @@
+{
+  "uid": "arcadia-wallet-payments",
+  "title": "Arcadia — Wallet & Payments",
+  "description": "Top row is the health of the money path. If any of those three is not zero, something is wrong with a user's balance.",
+  "tags": ["arcadia"],
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat", "title": "Ledger mismatches",
+      "description": "Wallets whose balance no longer equals the sum of their ledger. Must be zero.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
+      "targets": [{ "refId": "A", "expr": "sum(arcadia_ledger_mismatch_count)" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "red", "value": 1 }] } } },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat", "title": "Dead-lettered events (1h)",
+      "description": "Each one is a business operation that did not happen.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 0 },
+      "targets": [{ "refId": "A", "expr": "sum(increase(arcadia_events_dead_lettered_total[1h])) or vector(0)" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "red", "value": 1 }] } } },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat", "title": "Oldest unpublished event",
+      "description": "How far behind the outbox dispatcher is. A steady rise means it is stuck.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 0 },
+      "targets": [{ "refId": "A", "expr": "max(arcadia_outbox_oldest_pending_age_seconds)" }],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "yellow", "value": 30 }, { "color": "red", "value": 120 }] } } },
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "timeseries", "title": "Request rate",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "targets": [{ "refId": "A", "expr": "sum by (service, method) (rate(arcadia_rpc_requests_total[5m]))", "legendFormat": "{{service}} {{method}}" }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "type": "timeseries", "title": "Latency (p95, objective 300ms)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (service, le) (rate(arcadia_rpc_duration_seconds_bucket[5m])))", "legendFormat": "{{service}}" }],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "thresholdsStyle": { "mode": "line" } },
+        "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.3 }] } } }
+    },
+    {
+      "type": "timeseries", "title": "Money moved by reason",
+      "description": "Minor currency units. The fastest way to see that purchases stopped.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "targets": [{ "refId": "A", "expr": "sum by (reason) (rate(arcadia_money_moved_minor_total[5m]))", "legendFormat": "{{reason}}" }],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+    },
+    {
+      "type": "timeseries", "title": "Business rule rejections",
+      "description": "Not errors. INSUFFICIENT_FUNDS is the system working; a change in the mix is worth understanding.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "targets": [{ "refId": "A", "expr": "sum by (rule) (rate(arcadia_business_rule_rejections_total[5m]))", "legendFormat": "{{rule}}" }],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+    },
+    {
+      "type": "timeseries", "title": "Consumer lag",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 21 },
+      "targets": [{ "refId": "A", "expr": "arcadia_kafka_consumer_lag", "legendFormat": "{{topic}}" }],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "type": "timeseries", "title": "Idempotent replays",
+      "description": "Retries recognised and short-circuited. A spike means something upstream is retrying hard.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 21 },
+      "targets": [{ "refId": "A", "expr": "sum by (operation) (rate(arcadia_idempotent_replays_total[5m]))", "legendFormat": "{{operation}}" }],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "type": "timeseries", "title": "Callbacks rejected / attempts throttled",
+      "description": "A sustained stream of signature failures is somebody probing the one unauthenticated write path.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 21 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (reason) (rate(arcadia_payment_callbacks_rejected_total[5m]))", "legendFormat": "callback {{reason}}" },
+        { "refId": "B", "expr": "sum by (limiter) (rate(arcadia_rate_limit_blocks_total[5m]))", "legendFormat": "throttled {{limiter}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20 } } }
+    }
+  ]
+}

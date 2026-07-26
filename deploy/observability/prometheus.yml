@@ -1,0 +1,20 @@
+# Prometheus scrapes each service's /metrics endpoint directly.
+#
+# No OTel collector in between. The collector earns its place when several backends need
+# the same signals or when the storage choice must be swappable without redeploying
+# services; with one backend and two services it is a container that only forwards.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+
+rule_files: [/etc/prometheus/alerts.yml]
+
+scrape_configs:
+  - job_name: wallet-service
+    static_configs:
+      - targets: ['wallet-service:8080']
+
+  - job_name: payment-service
+    static_configs:
+      - targets: ['payment-service:8081']

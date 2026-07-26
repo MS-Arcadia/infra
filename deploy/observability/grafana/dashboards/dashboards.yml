@@ -1,0 +1,9 @@
+apiVersion: 1
+
+providers:
+  - name: Arcadia
+    folder: Arcadia
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
