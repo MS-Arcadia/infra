@@ -215,12 +215,15 @@ services:
       # Called synchronously before a purchase starts: price and existing ownership have to
       # be current at the moment of sale.
       CATALOG_BASE_URL: http://catalog-service:8082
+      # Discount codes only — see the note in the order service's config.
+      WALLET_BASE_URL: http://wallet-service:8080
       # Short locally so a reviewer sees the stalled-saga sweep actually run.
       SAGA_SWEEP_INTERVAL_SECONDS: 30
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
       catalog-service: { condition: service_started }
+      wallet-service: { condition: service_started }
     deploy:
       resources:
         limits:
