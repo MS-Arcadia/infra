@@ -167,3 +167,33 @@ def test_listing_by_reference_returns_the_screenshot_and_not_the_build(
     assert response.status == 200
     kinds = {item["kind"] for item in response.body}
     assert kinds == {"IMAGE"}, response.body
+
+
+# --- quotas -------------------------------------------------------------
+
+
+def test_a_developer_can_see_how_much_of_their_quota_they_have_used(developer, screenshot, build):
+    """A quota nobody can see is one they discover by having an upload refused after the bytes
+    have already gone over the wire."""
+    response = a.call("GET", f"{a.MEDIA}/v1/media/usage", user=developer, role="DEVELOPER")
+    assert response.status == 200, response
+
+    body = response.body
+    assert body["quota_bytes"] > 0
+    assert body["used_bytes"] >= len(PNG) + len(ZIP)
+    assert body["used_bytes"] + body["remaining_bytes"] == body["quota_bytes"]
+
+
+def test_the_quota_is_counted_per_developer(developer, screenshot):
+    """A fair share, not a total. Somebody who has uploaded nothing has their whole quota."""
+    newcomer = a.new_id()
+    theirs = a.call("GET", f"{a.MEDIA}/v1/media/usage", user=newcomer, role="DEVELOPER").body
+    mine = a.call("GET", f"{a.MEDIA}/v1/media/usage", user=developer, role="DEVELOPER").body
+
+    assert theirs["used_bytes"] == 0
+    assert theirs["remaining_bytes"] == theirs["quota_bytes"]
+    assert mine["used_bytes"] > 0
+
+
+def test_there_is_no_anonymous_quota(developer):
+    assert a.call("GET", f"{a.MEDIA}/v1/media/usage").status == 401
