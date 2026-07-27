@@ -10,6 +10,10 @@
 
 COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/docker-compose.yml
 
+# How many containers `make wait` expects to go healthy. Named so the two places that count
+# them cannot disagree.
+SERVICE_COUNT := 5
+
 .DEFAULT_GOAL := help
 .PHONY: help env images up up-metrics down restart wait nuke logs ps psql topics lint
 
@@ -21,17 +25,23 @@ env: ## Create .env from the template if it does not exist
 	@test -f deploy/compose/.env \
 		|| { cp deploy/compose/.env.example deploy/compose/.env; echo "created deploy/compose/.env"; }
 
-images: ## Build both service images (each service builds its own)
+images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../wallet-service docker
 	$(MAKE) -C ../payment-service docker
+	$(MAKE) -C ../catalog-service docker
+	$(MAKE) -C ../order-service docker
+	$(MAKE) -C ../media-service docker
 
-up: env ## Start Postgres, Redis, Kafka and both services
+up: env ## Start Postgres, Redis, Kafka and all five services
 	$(COMPOSE) up -d
 	@echo
 	@echo "  wallet   REST http://localhost:8080   gRPC localhost:9090"
 	@echo "  payment  REST http://localhost:8081   gRPC localhost:9091"
+	@echo "  catalog  REST http://localhost:8082   docs /docs"
+	@echo "  order    REST http://localhost:8083   docs /docs"
+	@echo "  media    REST http://localhost:8084   docs /docs"
 	@echo
-	@echo "  curl -s localhost:8080/readyz"
+	@echo "  make wait   # block until every service is healthy"
 
 up-metrics: env ## Start the platform plus Prometheus and Grafana
 	$(COMPOSE) --profile metrics up -d
@@ -40,18 +50,19 @@ up-metrics: env ## Start the platform plus Prometheus and Grafana
 down: ## Stop everything, keeping data
 	$(COMPOSE) --profile metrics down
 
-restart: ## Restart just the two services, after rebuilding an image
-	$(COMPOSE) up -d --force-recreate wallet-service payment-service
+restart: ## Restart the services, after rebuilding an image
+	$(COMPOSE) up -d --force-recreate \
+		wallet-service payment-service catalog-service order-service media-service
 
-wait: ## Block until both services report ready
-	@echo "waiting for both services to become healthy..."
-	@for i in $$(seq 1 60); do \
+wait: ## Block until every service reports ready
+	@echo "waiting for all $(SERVICE_COUNT) services to become healthy..."
+	@for i in $$(seq 1 90); do \
 		up=$$($(COMPOSE) ps --format '{{.Service}} {{.Health}}' \
 			| awk '$$1 ~ /-service$$/ && $$2 == "healthy"' | wc -l | tr -d ' '); \
-		[ "$$up" = "2" ] && { echo "both healthy"; exit 0; }; \
+		[ "$$up" = "$(SERVICE_COUNT)" ] && { echo "all $(SERVICE_COUNT) healthy"; exit 0; }; \
 		sleep 2; \
 	done; \
-	echo "timed out; try 'make ps' and 'make logs'"; exit 1
+	echo "timed out with $$up/$(SERVICE_COUNT) healthy; try 'make ps' and 'make logs'"; exit 1
 
 nuke: ## Stop everything and delete the volumes
 	$(COMPOSE) --profile metrics down -v

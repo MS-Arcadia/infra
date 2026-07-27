@@ -4,13 +4,12 @@
 # tags its own image, and compose pulls or reuses it. That keeps infra free of any
 # knowledge about how a service is compiled.
 #
-#   cd ../../../wallet-service  && make docker
-#   cd ../../../payment-service && make docker
+#   cd ../../../wallet-service  && make docker      (and catalog, order, media, payment)
 #   cd infra && make up
 #
 # Or `make images && make up` from infra, which does both.
 #
-# Five containers by default, roughly 1.2 GB of RAM. Metrics are opt-in:
+# Eight containers by default, roughly 1.8 GB of RAM. Metrics are opt-in:
 #
 #   docker compose --profile metrics up -d     # adds Prometheus + Grafana
 
@@ -32,9 +31,10 @@ services:
       # Runs once, on first boot of an empty data directory. Creates one database and
       # one role per service, isolated from each other by grants.
       - ../postgres/init:/docker-entrypoint-initdb.d:ro
-    # Two services with pools of 20 need nowhere near the default 100 connections;
-    # 128MB of shared buffers is ample for a development dataset.
-    command: [postgres, -c, max_connections=60, -c, shared_buffers=128MB]
+    # Five services, so the connection budget went up with them: two Go services with pools
+    # of 20 and three Python services with pools of 10. 128MB of shared buffers is still
+    # ample for a development dataset.
+    command: [postgres, -c, max_connections=100, -c, shared_buffers=128MB]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-arcadia} -d arcadia"]
       interval: 5s
@@ -175,6 +175,87 @@ services:
         limits:
           memory: 128M
 
+  catalog-service:
+    # Built by `cd catalog-service && make docker`. Nothing is compiled here.
+    image: arcadia/catalog-service:${CATALOG_VERSION:-local}
+    container_name: arcadia-catalog
+    restart: unless-stopped
+    ports:
+      - "${CATALOG_HTTP_PORT:-8082}:8082"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://catalog_user:catalog_pass@postgres:5432/arcadia_catalog
+      KAFKA_BROKERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      CURRENCY: ${WALLET_CURRENCY:-IRR}
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+
+  order-service:
+    image: arcadia/order-service:${ORDER_VERSION:-local}
+    container_name: arcadia-order
+    restart: unless-stopped
+    ports:
+      - "${ORDER_HTTP_PORT:-8083}:8083"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://order_user:order_pass@postgres:5432/arcadia_order
+      KAFKA_BROKERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      # Receives the platform's 30%. A real user id, so the platform's balance sits in the
+      # same ledger as everybody else's and reconciliation covers it too.
+      PLATFORM_USER_ID: ${PLATFORM_USER_ID}
+      # Called synchronously before a purchase starts: price and existing ownership have to
+      # be current at the moment of sale.
+      CATALOG_BASE_URL: http://catalog-service:8082
+      # Short locally so a reviewer sees the stalled-saga sweep actually run.
+      SAGA_SWEEP_INTERVAL_SECONDS: 30
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      catalog-service: { condition: service_started }
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+
+  media-service:
+    image: arcadia/media-service:${MEDIA_VERSION:-local}
+    container_name: arcadia-media
+    restart: unless-stopped
+    ports:
+      - "${MEDIA_HTTP_PORT:-8084}:8084"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://media_user:media_pass@postgres:5432/arcadia_media
+      KAFKA_BROKERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      # Signs download URLs. Deliberately NOT the same value as JWT_SECRET — the service
+      # refuses to boot if they match.
+      DOWNLOAD_SECRET: ${MEDIA_DOWNLOAD_SECRET}
+      STORAGE_ROOT: /var/lib/arcadia/media
+      # Must be reachable by a browser following the URLs, not by the Docker network.
+      PUBLIC_BASE_URL: http://localhost:${MEDIA_HTTP_PORT:-8084}
+    volumes:
+      # The store is stateful, which is the trade-off of using a filesystem rather than
+      # MinIO. Without this volume every restart loses every uploaded file.
+      - media-data:/var/lib/arcadia/media
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+
   # --- Metrics (profile: metrics) -----------------------------------------
   #
   # Prometheus scrapes each service's /metrics directly. There is no OTel collector,
@@ -225,3 +306,4 @@ services:
 volumes:
   postgres-data:
   kafka-data:
+  media-data:

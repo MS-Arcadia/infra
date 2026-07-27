@@ -29,12 +29,13 @@ Docker is the whole deployment story here — there is no Kubernetes, no Helm an
 Terraform. Both service images carry a `HEALTHCHECK`, so `make ps` tells you whether the
 platform is actually up rather than merely started.
 
-| | |
-|---|---|
-| Wallet REST | http://localhost:8080 |
-| Wallet gRPC | `localhost:9090` |
-| Payment REST | http://localhost:8081 |
-| Payment gRPC | `localhost:9091` |
+| Service | | Language |
+|---|---|---|
+| Wallet | http://localhost:8080 · gRPC `:9090` | Go |
+| Payment | http://localhost:8081 · gRPC `:9091` | Go |
+| Catalog | http://localhost:8082 · [docs](http://localhost:8082/docs) | Python |
+| Order | http://localhost:8083 · [docs](http://localhost:8083/docs) | Python |
+| Media | http://localhost:8084 · [docs](http://localhost:8084/docs) | Python |
 
 ```bash
 curl -s localhost:8080/readyz
@@ -45,15 +46,27 @@ and run **Setup → Mint tokens**.
 
 ## What runs, and what it costs
 
-Five containers by default, roughly 1.2 GB with the limits set in the compose file:
+Eight containers by default, roughly 1.8 GB with the limits set in the compose file:
 
 | | Memory limit | |
 |---|---|---|
-| `postgres` | 384M | one database and role per service |
+| `postgres` | 384M | one database and role per service, five of them |
 | `kafka` | 640M | KRaft mode, no ZooKeeper, one partition per topic |
 | `redis` | 96M | gift-card rate-limit windows only, no persistence |
-| `wallet-service` | 128M | |
-| `payment-service` | 128M | |
+| `wallet-service` | 128M | Go |
+| `payment-service` | 128M | Go |
+| `catalog-service` | 160M | Python; one uvicorn worker |
+| `order-service` | 160M | Python; one uvicorn worker |
+| `media-service` | 160M | Python; uploads stream, so this does not scale with file size |
+
+The Python services get 160M rather than 128M because a CPython process with SQLAlchemy and
+aiokafka loaded starts higher than a Go binary does. One uvicorn worker each: a second worker
+inside the container would double the database pool and the Kafka consumers without doubling
+anything the service is short of.
+
+The media service is the one worth watching. Its limit does **not** scale with upload size —
+uploads and downloads both stream in 1 MiB chunks, so a 4 GB game build passes through a
+160 MB container. What does grow is its **disk**, which is why it has a volume and an alert.
 
 Metrics are opt-in and add two more:
 
@@ -93,12 +106,25 @@ databases, so nothing prevents it.
 
 | Topic | Producer | Consumed by |
 |---|---|---|
-| `wallet-events` | wallet | Store (saga replies), Notification, Auth (abuse flags) |
+| `wallet-events` | wallet | **order (saga replies)**, Notification, Auth (abuse flags) |
 | `audit-events` | wallet | the audit sink |
 | `payment-events` | payment | wallet |
-| `wallet-commands` | Store | wallet |
+| `wallet-commands` | **order** | wallet |
+| `game-events` | **catalog** | **order (ownership replies)**, Search, Festival, Profile |
+| `catalog-commands` | **order** | **catalog** |
+| `purchase-events` | **order** | Notification, Recommendation, Profile |
+| `media-events` | **media** | Search, Profile |
 | `trade-events` | Marketplace | wallet |
 | `user-events` | Auth | wallet, Profile, Notification |
+
+The two **`-commands`** topics are different from the rest. They are addressed to exactly one
+service, so an unrecognised message on them is dead-lettered rather than ignored: it means the
+sender is issuing a command the receiver does not implement, which is a contract violation
+worth an operator's attention.
+
+Everything ending in `-events` is shared. A consumer there ignores what it does not handle —
+`wallet-events` carries every balance change on the platform, and the order service has no
+business dead-lettering a gift-card redemption.
 
 Every consumed topic has a `<topic>.dlq` companion. Broker-side auto-creation is **off**:
 each service declares the topics it owns at boot, so a typo fails loudly rather than
@@ -145,3 +171,5 @@ trains people to ignore all of it.
 2. Add it to `deploy/compose/docker-compose.yml` with an `image:` line. It builds its own
    image; this repository does not.
 3. Add a scrape target to `deploy/observability/prometheus.yml`.
+4. Add its `make docker` to the `images` target and bump `SERVICE_COUNT` in the Makefile, so
+   `make wait` knows how many containers to expect.

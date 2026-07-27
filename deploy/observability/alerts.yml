@@ -92,3 +92,32 @@ groups:
         labels: { severity: ticket }
         annotations:
           summary: "Elevated gift card guessing across the platform"
+
+      - alert: PurchaseSagaAbandoned
+        # A saga the sweeper gave up on. Each one is a person whose money moved and whose
+        # entitlement did not, or the reverse — it cannot be resolved by retrying, which is
+        # why it pages rather than waiting for business hours.
+        expr: increase(arcadia_order_sagas_abandoned_total[15m]) > 0
+        labels: { severity: page }
+        annotations:
+          summary: "A purchase saga was abandoned at step {{ $labels.step }}"
+          runbook: "GET /v1/users/{id}/orders shows which step, and whether the buyer was debited"
+
+      - alert: PurchaseSagasStalling
+        # Individual stalls are normal and self-healing: the sweeper re-issues the command.
+        # A sustained backlog is not — it means replies are not coming back at all, so every
+        # purchase is now taking minutes instead of seconds.
+        expr: arcadia_order_sagas_unfinished > 10
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: "{{ $value }} purchase sagas are past their stall threshold"
+
+      - alert: MediaStoreFillingUp
+        # The media service is the one whose disk fills. When it does, Postgres on the same
+        # host stops being able to write either, so this is not only a media problem.
+        expr: arcadia_media_stored_bytes > 16 * 1024 * 1024 * 1024
+        for: 15m
+        labels: { severity: ticket }
+        annotations:
+          summary: "The media store holds {{ $value | humanize1024 }}B"

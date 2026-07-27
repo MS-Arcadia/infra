@@ -2,7 +2,7 @@
 #
 # No OTel collector in between. The collector earns its place when several backends need
 # the same signals or when the storage choice must be swappable without redeploying
-# services; with one backend and two services it is a container that only forwards.
+# services; with one backend and five services it is a container that only forwards.
 
 global:
   scrape_interval: 15s
@@ -18,3 +18,15 @@ scrape_configs:
   - job_name: payment-service
     static_configs:
       - targets: ['payment-service:8081']
+
+  - job_name: catalog-service
+    static_configs:
+      - targets: ['catalog-service:8082']
+
+  - job_name: order-service
+    static_configs:
+      - targets: ['order-service:8083']
+
+  - job_name: media-service
+    static_configs:
+      - targets: ['media-service:8084']
