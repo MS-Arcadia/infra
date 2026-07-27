@@ -11,7 +11,7 @@
 COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/docker-compose.yml
 
 .DEFAULT_GOAL := help
-.PHONY: help env images up up-metrics down restart nuke logs ps psql topics lint
+.PHONY: help env images up up-metrics down restart wait nuke logs ps psql topics lint
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -43,6 +43,16 @@ down: ## Stop everything, keeping data
 restart: ## Restart just the two services, after rebuilding an image
 	$(COMPOSE) up -d --force-recreate wallet-service payment-service
 
+wait: ## Block until both services report ready
+	@echo "waiting for both services to become healthy..."
+	@for i in $$(seq 1 60); do \
+		up=$$($(COMPOSE) ps --format '{{.Service}} {{.Health}}' \
+			| awk '$$1 ~ /-service$$/ && $$2 == "healthy"' | wc -l | tr -d ' '); \
+		[ "$$up" = "2" ] && { echo "both healthy"; exit 0; }; \
+		sleep 2; \
+	done; \
+	echo "timed out; try 'make ps' and 'make logs'"; exit 1
+
 nuke: ## Stop everything and delete the volumes
 	$(COMPOSE) --profile metrics down -v
 	@echo "volumes removed; the next 'make up' re-runs the database init script"
@@ -59,9 +69,7 @@ psql: ## Open psql against the wallet database
 topics: ## List Kafka topics
 	$(COMPOSE) exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list
 
-lint: ## Validate the compose file and the Kubernetes manifests
+lint: ## Validate the compose file and the config files it mounts
 	@$(COMPOSE) config -q && echo "compose is valid"
-	@for f in deploy/k8s/*.yaml; do \
-		python3 -c "import yaml,sys; list(yaml.safe_load_all(open(sys.argv[1])))" "$$f" \
-			&& echo "$$f parses"; \
-	done
+	@python3 -c "import glob,json,yaml; [ (json.load(open(p)) if p.endswith('.json') else list(yaml.safe_load_all(open(p)))) for p in glob.glob('deploy/**/*.y*ml', recursive=True) + glob.glob('deploy/**/*.json', recursive=True) ]" \
+		&& echo "all mounted config files parse"

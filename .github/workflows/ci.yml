@@ -1,8 +1,8 @@
 # Infrastructure pipeline.
 #
 # There is no Go here and nothing is compiled. All this checks is that the files which
-# describe a deployment are actually valid, and that no real credential has been pasted
-# into a committed Secret.
+# describe a deployment are actually valid, and that no real credential has been
+# committed.
 
 name: CI
 
@@ -28,27 +28,28 @@ jobs:
           docker compose config -q
           echo "compose is valid"
 
-      - name: Kubernetes manifests
+      - name: No real credentials committed
         run: |
-          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
-            | tar -xz kubeconform
-          ./kubeconform -strict -summary -kubernetes-version 1.29.0 deploy/k8s/*.yaml
-
-      - name: Committed secrets are still placeholders
-        run: |
-          # The Secret manifests are committed so the files apply on a fresh cluster. This
-          # is the guard that stops a real credential being pasted into one.
+          # Secrets live in deploy/compose/.env, which is gitignored. .env.example is
+          # committed, so this is the guard that stops a real value being pasted into it.
+          if git ls-files --error-unmatch deploy/compose/.env >/dev/null 2>&1; then
+            echo "deploy/compose/.env is committed; it must stay local"
+            exit 1
+          fi
           failed=0
-          for f in deploy/k8s/*.yaml; do
-            while IFS= read -r line; do
-              case "$line" in
-                *REPLACE*) ;;
-                *) echo "$f: secret value without a placeholder: $line"; failed=1 ;;
-              esac
-            done < <(awk '/^stringData:/{s=1;next} /^[a-z-]/{s=0} s && /^  [A-Z_]+:/{print}' "$f")
-          done
+          while IFS='=' read -r key value; do
+            case "$key" in ''|'#'*) continue ;; esac
+            case "$key" in
+              *SECRET*|*PASSWORD*|*PEPPER*|*API_KEY*|*TOKEN*) ;;
+              *) continue ;;
+            esac
+            case "$value" in
+              *change*|*replace*|*CHANGE*|*REPLACE*|'') ;;
+              *) echo ".env.example: $key must stay an obvious placeholder"; failed=1 ;;
+            esac
+          done < deploy/compose/.env.example
           [ "$failed" -eq 0 ] || exit 1
-          echo "all committed secrets are still placeholders"
+          echo "no real credentials are committed"
 
       - name: Config files parse
         run: |

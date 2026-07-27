@@ -8,10 +8,10 @@
 -- payment_intents, exactly as it could not if the two lived on different hosts.
 --
 -- What is gained is one container instead of one per service. What is given up is
--- independent failure and scaling of the storage layer — which is why the Kubernetes
--- manifests point each service at its own hostname, making the promotion to a dedicated
--- instance a change to one connection string. No application query joins across
--- databases, so nothing prevents it.
+-- independent failure and scaling of the storage layer. That is repaid by each service
+-- knowing nothing but its own DATABASE_URL: promoting one database to its own instance
+-- is a change to one connection string, and no application query joins across databases,
+-- so nothing prevents it.
 --
 -- Only the two services that exist get a database. Adding one later is four lines here
 -- plus recreating the volume (`make nuke`), because this script runs once, on first boot
