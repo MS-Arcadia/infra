@@ -1,0 +1,4 @@
+# Only what the tests themselves need. They talk to the platform over HTTP and Kafka,
+# so nothing from any service's own dependency set belongs here.
+pytest>=8.3,<9.0
+pyjwt>=2.9,<3.0

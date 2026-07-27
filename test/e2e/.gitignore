@@ -1,0 +1,4 @@
+# The virtualenv `make e2e` creates.
+.venv/
+__pycache__/
+.pytest_cache/

@@ -20,7 +20,8 @@ Build the images first, in the service repositories, then start the platform:
 ```bash
 make images      # calls each service's own `make docker`
 make up
-make wait        # blocks until both services report ready
+make wait        # blocks until every service reports ready
+make e2e         # 75 checks against the running platform, ~20s
 ```
 
 Or if the images already exist, just `make up`. `make help` lists the rest.
@@ -153,6 +154,28 @@ The things a cluster would have given us and how they are covered meanwhile:
   restriction on the payment adapter, the platform's only route to the public internet —
   that needs a real network policy, and it is the first thing to add if this ever moves
   to a cluster.
+
+## End-to-end tests
+
+`make e2e` runs 75 checks against the running platform: a game published, bought, refunded and
+gifted, the compensation path reached with a real race, files uploaded and served, and then the
+invariants no API exposes — every dead-letter topic empty, every outbox drained, every balance
+still equal to the sum of its ledger.
+
+It is **not** in CI, and that is a deliberate choice rather than an omission — the reasoning,
+and the job to add if you want it, are in [`test/e2e/README.md`](test/e2e/README.md).
+
+It exists because the five services had 389 unit tests, all green, and nine bugs surfaced in
+the first hour the platform was actually run with Docker. None was about logic; every one was
+about configuration or topology. `make e2e-health` alone is the quickest useful check after an
+incident.
+
+```bash
+make e2e          # everything, ~20s
+make e2e-health   # just the invariants, ~5s, changes nothing
+```
+
+Repeatable: every run uses fresh user ids, so it does not need `make nuke` first.
 
 ## Alerts
 

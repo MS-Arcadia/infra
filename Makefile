@@ -15,7 +15,7 @@ COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/d
 SERVICE_COUNT := 5
 
 .DEFAULT_GOAL := help
-.PHONY: help env images up up-metrics down restart wait nuke logs ps psql topics lint
+.PHONY: help env images up up-metrics down restart wait nuke logs ps psql topics lint e2e e2e-health e2e-install
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -94,6 +94,25 @@ psql: ## Open psql against the wallet database
 
 topics: ## List Kafka topics
 	$(COMPOSE) exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list
+
+e2e: ## Run the end-to-end tests against the running platform (see test/e2e/README.md)
+	@# Not part of CI, and not part of `make up`. It needs the whole platform running and it
+	@# changes state — publishing a game, moving money — so it is something you ask for.
+	@test -d test/e2e/.venv || { \
+		echo "creating test/e2e/.venv"; \
+		python3 -m venv test/e2e/.venv; \
+		test/e2e/.venv/bin/pip install --quiet -r test/e2e/requirements.txt; \
+	}
+	@cd test/e2e && .venv/bin/python -m pytest . -q
+
+e2e-health: ## Just the platform invariants: DLQs empty, outboxes drained, ledger balances
+	@test -d test/e2e/.venv || $(MAKE) e2e-install
+	@cd test/e2e && .venv/bin/python -m pytest test_99_platform_health.py -v
+
+e2e-install: ## Create the virtualenv the end-to-end tests use
+	python3 -m venv test/e2e/.venv
+	test/e2e/.venv/bin/pip install --quiet -r test/e2e/requirements.txt
+	@echo "installed"
 
 lint: ## Validate the compose file and the config files it mounts
 	@$(COMPOSE) config -q && echo "compose is valid"
