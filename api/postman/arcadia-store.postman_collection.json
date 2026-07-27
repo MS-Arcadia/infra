@@ -269,9 +269,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('four tokens were minted', function () {",
-                  "    ['userToken', 'developerToken', 'supportToken', 'adminToken']",
-                  "        .forEach((name) => pm.expect(pm.collectionVariables.get(name), name).to.be.a('string').and.not.empty);",
+                  "const names = ['userToken', 'developerToken', 'supportToken',",
+                  "               'adminToken', 'platformToken'];",
+                  "pm.test('every role token was minted', function () {",
+                  "    names.forEach(function (name) {",
+                  "        const value = pm.collectionVariables.get(name);",
+                  "        pm.expect(value, name).to.be.a('string').and.not.empty;",
+                  "    });",
                   "});"
                 ]
               }

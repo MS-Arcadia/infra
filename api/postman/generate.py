@@ -88,7 +88,12 @@ def req(
 
 
 def anon(
-    name: str, method: str, raw_url: str, *, description: str, tests: list[str] | None = None
+    name: str,
+    method: str,
+    raw_url: str,
+    *,
+    description: str,
+    tests: list[str] | None = None,
 ) -> dict:
     item = req(name, method, raw_url, description=description, tests=tests)
     item["request"]["auth"] = {"type": "noauth"}
@@ -162,7 +167,9 @@ def capture(code: int, var: str, field: str = "id") -> list[str]:
     ]
 
 
-def approval_chain(var: str, title: str, price_minor: int, *, publish: bool) -> list[dict]:
+def approval_chain(
+    var: str, title: str, price_minor: int, *, publish: bool
+) -> list[dict]:
     """The six requests that take a game from nothing to for-sale.
 
     Emitted rather than written out because folders 5 and 6 each need their **own** game: a game
@@ -179,7 +186,10 @@ def approval_chain(var: str, title: str, price_minor: int, *, publish: bool) -> 
             "{{catalogBase}}/v1/games",
             token="developerToken",
             idempotent=True,
-            body={"title": title, "description": f"{title}, for this folder's own use."},
+            body={
+                "title": title,
+                "description": f"{title}, for this folder's own use.",
+            },
             description="Its own game, so this folder runs independently of the others.",
             tests=capture(201, var),
         ),
@@ -189,7 +199,11 @@ def approval_chain(var: str, title: str, price_minor: int, *, publish: bool) -> 
             f"{{{{catalogBase}}}}/v1/games/{{{{{var}}}}}/versions",
             token="developerToken",
             idempotent=True,
-            body={"version": "1.0.0", "file_ref": "{{buildId}}", "size_bytes": 1073741824},
+            body={
+                "version": "1.0.0",
+                "file_ref": "{{buildId}}",
+                "size_bytes": 1073741824,
+            },
             description="A game needs one before it can be submitted — there is nothing to "
             "review otherwise.",
             tests=ok(201),
@@ -265,10 +279,13 @@ setup = folder(
                     "script": {
                         "type": "text/javascript",
                         "exec": [
-                            "pm.test('four tokens were minted', function () {",
-                            "    ['userToken', 'developerToken', 'supportToken', 'adminToken']",
-                            "        .forEach((name) => pm.expect(pm.collectionVariables.get(name)"
-                            ", name).to.be.a('string').and.not.empty);",
+                            "const names = ['userToken', 'developerToken', 'supportToken',",
+                            "               'adminToken', 'platformToken'];",
+                            "pm.test('every role token was minted', function () {",
+                            "    names.forEach(function (name) {",
+                            "        const value = pm.collectionVariables.get(name);",
+                            "        pm.expect(value, name).to.be.a('string').and.not.empty;",
+                            "    });",
                             "});",
                         ],
                     },
@@ -382,7 +399,9 @@ publishing = folder(
             "PATCH",
             "{{catalogBase}}/v1/games/{{gameId}}",
             token="developerToken",
-            body={"description": "A synthwave racer. Now with a rival AI that learns your line."},
+            body={
+                "description": "A synthwave racer. Now with a rival AI that learns your line."
+            },
             description=(
                 "Editable while it is a draft. Once submitted for review it is not: a "
                 "reviewer must be looking at the same thing the developer submitted."
@@ -668,7 +687,7 @@ media = folder(
             token="developerToken",
             description=(
                 "A file the caller may not read is reported **not found**, not forbidden. "
-                "\"Forbidden\" confirms the id is real, which is enough to tell somebody "
+                '"Forbidden" confirms the id is real, which is enough to tell somebody '
                 "enumerating ids that they have found an unreleased build."
             ),
             tests=ok(200),
@@ -742,7 +761,7 @@ media = folder(
             "{{mediaBase}}/v1/media/{{mediaId}}",
             token="developerToken",
             description=(
-                "Soft delete: the row stays so a reference to it resolves to \"deleted\" "
+                'Soft delete: the row stays so a reference to it resolves to "deleted" '
                 "rather than a 404 an operator cannot explain. The space is given back to the "
                 "owner's quota immediately.\n\n"
                 "Skip this if you want the store page to keep its screenshot."
@@ -962,9 +981,9 @@ preorders = folder(
             body={"release_at": "2027-01-01T00:00:00Z"},
             description=(
                 "Purchasable, but not released.\n\n"
-                "The order service refuses a mismatch in **both** directions: pressing \"buy\" "
+                'The order service refuses a mismatch in **both** directions: pressing "buy" '
                 "on something unreleased must not hold funds for weeks unexpectedly, and "
-                "pressing \"pre-order\" on a released game must not defer a payment the buyer "
+                'pressing "pre-order" on a released game must not defer a payment the buyer '
                 "expected to make now."
             ),
             tests=ok(200),
@@ -1290,7 +1309,7 @@ staff = folder(
             "GET",
             "{{catalogBase}}/v1/users/{{userId}}/library",
             token="supportToken",
-            description="A support agent answering \"where is my game\". A basic user asking "
+            description='A support agent answering "where is my game". A basic user asking '
             "for another user's library is refused.",
             tests=ok(200),
         ),
@@ -1374,7 +1393,7 @@ collection = {
             "balances, top-ups, gift cards, discount codes and the ledger.\n\n"
             "## Things worth knowing\n\n"
             "**Amounts are integers in the currency's minor unit**, and they are *strings* — "
-            "`{\"amount_minor\": \"1000000\", \"currency\": \"IRR\"}` is 10,000 IRR. A string "
+            '`{"amount_minor": "1000000", "currency": "IRR"}` is 10,000 IRR. A string '
             "because a JavaScript client silently truncates integers above 2^53, and a price is "
             "not a thing to be approximately right about.\n\n"
             "**Rates are basis points, never percentages or floats.** 70% is 7000. 25% off is "
@@ -1465,7 +1484,11 @@ collection = {
             "value": "33333333-3333-4333-8333-333333333333",
             "type": "string",
         },
-        {"key": "adminId", "value": "44444444-4444-4444-8444-444444444444", "type": "string"},
+        {
+            "key": "adminId",
+            "value": "44444444-4444-4444-8444-444444444444",
+            "type": "string",
+        },
         {
             "key": "platformUserId",
             "value": "00000000-0000-4000-8000-000000000001",
@@ -1527,11 +1550,15 @@ mint = collection["item"][0]["item"][0]["event"][0]["script"]["exec"]
 anchor = "pm.collectionVariables.set('userToken', sign(pm.collectionVariables.get('userId'), 'BASIC_USER'));"
 assert anchor in mint, "the wallet collection's mint script changed shape"
 for extra in (
-    "pm.collectionVariables.set('developerToken', "
-    "sign(pm.collectionVariables.get('developerId'), 'DEVELOPER'));",
+    (
+        "pm.collectionVariables.set('developerToken', "
+        "sign(pm.collectionVariables.get('developerId'), 'DEVELOPER'));"
+    ),
     # The platform holds a wallet like any other user, and its 30% has to land in one.
-    "pm.collectionVariables.set('platformToken', "
-    "sign(pm.collectionVariables.get('platformUserId'), 'BASIC_USER'));",
+    (
+        "pm.collectionVariables.set('platformToken', "
+        "sign(pm.collectionVariables.get('platformUserId'), 'BASIC_USER'));"
+    ),
 ):
     mint.insert(mint.index(anchor) + 1, extra)
 
