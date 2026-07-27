@@ -24,6 +24,21 @@ help: ## Show this help
 env: ## Create .env from the template if it does not exist
 	@test -f deploy/compose/.env \
 		|| { cp deploy/compose/.env.example deploy/compose/.env; echo "created deploy/compose/.env"; }
+	@# .env is never overwritten — it holds local edits. But a template that has moved on is
+	@# worth saying out loud: a variable added to .env.example is simply absent from .env, and
+	@# the service that needs it fails at boot with nothing pointing at the stale file.
+	@missing=""; \
+	for key in $$(grep -oE '^[A-Z_][A-Z0-9_]*' deploy/compose/.env.example); do \
+		grep -qE "^$$key=" deploy/compose/.env || missing="$$missing $$key"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo; \
+		echo "  NOTE: deploy/compose/.env is missing variables that .env.example defines:"; \
+		for key in $$missing; do echo "    $$key"; done; \
+		echo; \
+		echo "  Add them, or start over with:  rm deploy/compose/.env && make env"; \
+		echo; \
+	fi
 
 images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../wallet-service docker
