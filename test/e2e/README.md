@@ -1,6 +1,6 @@
 # End-to-end tests
 
-75 checks against the **running** platform. Five services, real Kafka, real Postgres, real
+104 checks against the **running** platform. Five services, real Kafka, real Postgres, real
 files on disk.
 
 **Run manually. Deliberately not in CI** — see [Why not in CI](#why-not-in-ci).
@@ -44,11 +44,30 @@ A unit test cannot find any of those. That is what this suite is for.
 | `test_03_refund.py` | §6.2 — the twelve-hour window, the reversals, re-purchase |
 | `test_04_gift.py` | Gifts, the 2% message fee, and that a gift is not refundable |
 | `test_05_compensation.py` | The compensation path, reached with a real race |
-| `test_06_media.py` | Uploads, disguised files, signed download URLs |
+| `test_06_media.py` | Uploads, disguised files, signed download URLs, per-developer quotas |
+| `test_07_preorders.py` | Requirement 1.5 — funds held, then captured at release |
+| `test_08_discount_codes.py` | §3.2 — previewing without consuming, and who absorbs the discount |
+| `test_09_instalments.py` | §3.3 — paying over time, and losing the game by not paying |
 | `test_99_platform_health.py` | Invariants: DLQs empty, outboxes drained, the ledger balances |
 
 The numbering is load-bearing: pytest runs files in name order, and the suite tells one story
 — a game is published, then bought, then refunded, then gifted.
+
+### Three of these prove things no unit test can
+
+`test_08` asks for the same discount code twice and asserts the second quote still offers it.
+Previewing a code must not spend it, and the spending happens **inside the wallet** — nothing in
+the order service's own tests can see whether a redemption was consumed.
+
+`test_09` is the strongest case for the suite existing. It found that the saga's split step
+credited the developer 70% of the **price** when the first instalment cleared: the platform paying
+out 700,000 on 250,000 collected, and losing the difference outright if the plan defaulted. Every
+unit test in the order service passed, because each was asking about one payment and this was a
+number assembled from the order. Two regression tests now cover it.
+
+The same file's default test crosses three services in one assertion: the plan defaults in order,
+the entitlement is revoked in catalog, and the wallet is asked for nothing at all. Nothing short
+of a running platform can check that the game actually left the library.
 
 ### The compensation test is the one worth reading
 
@@ -148,6 +167,11 @@ pytest test/e2e/test_99_platform_health.py -v       # just the invariants, ~5s
 pytest test/e2e -m "not slow"                       # skip anything that waits on the saga
 pytest test/e2e --durations=10                      # find what is slow
 ```
+
+`test_09` moves due dates with SQL and drives collection through the admin endpoint, because
+the platform's clock is real and no test can wait a month for a payment. One collection pass per
+payment, waiting for the wallet in between — a payment already in flight is deliberately not
+offered again, so hammering the endpoint collects exactly one and then nothing.
 
 `test_99` on its own is the quickest useful check after an incident: it says whether anything
 is dead-lettered, stuck, or out of balance, without changing any state.
