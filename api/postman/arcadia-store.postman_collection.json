@@ -1,0 +1,3823 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-0002-4000-8000-arcadiastore01",
+    "name": "Arcadia — Store, Orders & Media",
+    "description": "Every endpoint of the catalog, order and media services, in the order you would actually exercise them: publish a game, upload its screenshots, buy it, gift it, pre-order it, put it on a payment plan, discount it, refund it.\n\n## Getting started\n\n1. Start the platform: `cd infra/deploy/compose && docker compose up -d`\n2. Select the **Arcadia Local** environment.\n3. Run **0. Setup** end to end. It mints the role tokens, provisions the three wallets money moves between, and funds the buyer.\n4. Work down the folders in order. Later folders use ids the earlier ones captured.\n\nThe companion collection, **Arcadia — Wallet & Payments**, covers money: balances, top-ups, gift cards, discount codes and the ledger.\n\n## Things worth knowing\n\n**Amounts are integers in the currency's minor unit**, and they are *strings* — `{\"amount_minor\": \"1000000\", \"currency\": \"IRR\"}` is 10,000 IRR. A string because a JavaScript client silently truncates integers above 2^53, and a price is not a thing to be approximately right about.\n\n**Rates are basis points, never percentages or floats.** 70% is 7000. 25% off is 2500.\n\n**Buying returns `202 Accepted`, not `201`.** A purchase is a saga across three services — debit, grant, split — so the order exists before the money has moved. Re-read the order a second later and it is `COMPLETED`. This is the honest answer: reporting `201 Created` would claim the sale finished while the wallet had not yet been asked.\n\n**Every money-moving request carries an `Idempotency-Key`.** The collection generates a fresh UUID per request. Send one twice with the same key and you get the first response back with no second charge.\n\n**Four tokens, not one.** The rules genuinely differ by role, and signing a single token would hide every authorisation rule in the platform. A few requests here exist specifically to be **refused** — a gift refund, an anonymous private download, a basic user on an admin endpoint — because a guard nobody has seen fire is a guard nobody knows works.\n\n**Some requests need a file or a second game.** The media uploads need you to pick a file in the Body tab; the pre-order folder needs `preorderGameId` set to a game with pre-orders open. Both say so in their own description.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{userToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// A fresh idempotency key per request, so every request in the collection",
+          "// is safe to re-run. Pin `pinnedIdempotencyKey` to reuse one deliberately",
+          "// and watch the replay guard work.",
+          "if (!pm.collectionVariables.get('pinnedIdempotencyKey')) {",
+          "    pm.collectionVariables.set('idempotencyKey', require('uuid').v4());",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Applies to every request. A 4xx is often the point here — several",
+          "// requests exist to be refused — but a 5xx never is, and it should fail",
+          "// the run rather than be quietly reported as a pass.",
+          "pm.test('no server error', function () {",
+          "    pm.expect(pm.response.code).to.be.below(500);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "catalogBase",
+      "value": "http://localhost:8082",
+      "type": "string"
+    },
+    {
+      "key": "orderBase",
+      "value": "http://localhost:8083",
+      "type": "string"
+    },
+    {
+      "key": "mediaBase",
+      "value": "http://localhost:8084",
+      "type": "string"
+    },
+    {
+      "key": "walletBase",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "idempotencyKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "pinnedIdempotencyKey",
+      "value": "",
+      "type": "string",
+      "description": "Set this to any value to stop the per-request key rotating."
+    },
+    {
+      "key": "userToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "developerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "supportToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "platformToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "11111111-1111-4111-8111-111111111111",
+      "type": "string",
+      "description": "The buyer."
+    },
+    {
+      "key": "developerId",
+      "value": "22222222-2222-4222-8222-222222222222",
+      "type": "string"
+    },
+    {
+      "key": "supportId",
+      "value": "33333333-3333-4333-8333-333333333333",
+      "type": "string"
+    },
+    {
+      "key": "adminId",
+      "value": "44444444-4444-4444-8444-444444444444",
+      "type": "string"
+    },
+    {
+      "key": "platformUserId",
+      "value": "00000000-0000-4000-8000-000000000001",
+      "type": "string",
+      "description": "Must match PLATFORM_USER_ID in infra/deploy/compose/.env."
+    },
+    {
+      "key": "friendId",
+      "value": "55555555-5555-4555-8555-555555555555",
+      "type": "string",
+      "description": "The gift recipient."
+    },
+    {
+      "key": "gameId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "preorderGameId",
+      "value": "",
+      "type": "string",
+      "description": "A second game with pre-orders open. Set it by hand — publishing and opening pre-orders are mutually exclusive on one game."
+    },
+    {
+      "key": "versionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "mediaId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "buildId",
+      "value": "pending-upload",
+      "type": "string",
+      "description": "The media id of the game's build. Defaults to a placeholder so the publishing folder runs on its own; the Media folder overwrites it with a real one."
+    },
+    {
+      "key": "downloadUrl",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "pollAttempts",
+      "value": "0",
+      "type": "string",
+      "description": "Bookkeeping for the requests that wait on a saga."
+    },
+    {
+      "key": "promotionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "orderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "giftOrderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "preorderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "planGameId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "planOrderId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Setup",
+      "description": "Run **Mint tokens** once, then work down the folders in order. Everything after it depends on the ids these requests capture.",
+      "item": [
+        {
+          "name": "Mint tokens",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Signs three HS256 access tokens with the same secret the services verify",
+                  "// with, so the collection works without standing up the Auth service.",
+                  "// Everything below is plain CryptoJS because Postman's sandbox has no JWT",
+                  "// library.",
+                  "// `crypto-js` is bound to a local name because the Postman sandbox already",
+                  "// exposes CryptoJS as a global, and `const CryptoJS = ...` redeclares it —",
+                  "// which fails the whole script with \"Identifier already declared\" and every",
+                  "// request after it with a 401. Found by running the collection under newman.",
+                  "const cryptoJs = require('crypto-js');",
+                  "const secret = pm.environment.get('jwtSecret');",
+                  "if (!secret) { throw new Error('Set jwtSecret in the environment — it must match the services JWT_SECRET'); }",
+                  "",
+                  "function base64url(input) {",
+                  "    return cryptoJs.enc.Base64.stringify(input)",
+                  "        .replace(/=/g, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "}",
+                  "",
+                  "function sign(subject, role) {",
+                  "    const now = Math.floor(Date.now() / 1000);",
+                  "    const header = { alg: 'HS256', typ: 'JWT' };",
+                  "    const claims = {",
+                  "        sub: subject,",
+                  "        role: role,",
+                  "        typ: 'access',",
+                  "        iss: pm.environment.get('jwtIssuer') || 'arcadia-auth',",
+                  "        aud: pm.environment.get('jwtAudience') || 'arcadia',",
+                  "        iat: now,",
+                  "        nbf: now,",
+                  "        exp: now + 3600,",
+                  "        jti: 'postman-' + now + '-' + role",
+                  "    };",
+                  "    const encodedHeader = base64url(cryptoJs.enc.Utf8.parse(JSON.stringify(header)));",
+                  "    const encodedClaims = base64url(cryptoJs.enc.Utf8.parse(JSON.stringify(claims)));",
+                  "    const signingInput = encodedHeader + '.' + encodedClaims;",
+                  "    const signature = base64url(cryptoJs.HmacSHA256(signingInput, secret));",
+                  "    return signingInput + '.' + signature;",
+                  "}",
+                  "",
+                  "pm.collectionVariables.set('userToken', sign(pm.collectionVariables.get('userId'), 'BASIC_USER'));",
+                  "pm.collectionVariables.set('platformToken', sign(pm.collectionVariables.get('platformUserId'), 'BASIC_USER'));",
+                  "pm.collectionVariables.set('developerToken', sign(pm.collectionVariables.get('developerId'), 'DEVELOPER'));",
+                  "pm.collectionVariables.set('supportToken', sign(pm.collectionVariables.get('supportId'), 'SUPPORT'));",
+                  "pm.collectionVariables.set('adminToken', sign(pm.collectionVariables.get('adminId'), 'ADMIN'));",
+                  "console.log('Minted user, support and admin tokens (valid for one hour).');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('four tokens were minted', function () {",
+                  "    ['userToken', 'developerToken', 'supportToken', 'adminToken']",
+                  "        .forEach((name) => pm.expect(pm.collectionVariables.get(name), name).to.be.a('string').and.not.empty);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/livez",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "livez"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Signs four HS256 tokens with the same `JWT_SECRET` the services verify with, so this collection works with no Auth service running.\n\nThe request itself is only a health check — the work happens in the pre-request script, and pointing it at `/healthz` means running this folder also tells you whether the platform is up.\n\nFour roles because the catalog's rules genuinely differ by role: a **developer** submits a game, **support** reviews it, an **admin** runs the sweeps, and a **basic user** buys it. Signing one token and reusing it would hide every authorisation rule in the platform."
+          }
+        },
+        {
+          "name": "Provision the developer's wallet",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{walletBase}}/v1/wallets/me",
+              "host": [
+                "{{walletBase}}"
+              ],
+              "path": [
+                "v1",
+                "wallets",
+                "me"
+              ]
+            },
+            "description": "A wallet is created on first access, so reading it is all it takes.\n\nNeeded **before** anything is bought. The revenue split credits the developer, and a credit to a user with no wallet is dead-lettered — the purchase then sits at the split step with no visible error, which is exactly how it failed the first time the end-to-end suite ran this flow.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Provision the buyer's wallet",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{walletBase}}/v1/wallets/me",
+              "host": [
+                "{{walletBase}}"
+              ],
+              "path": [
+                "v1",
+                "wallets",
+                "me"
+              ]
+            },
+            "description": "The same call as the developer's, with the buyer's token. Without it the next request is a 404: there is no wallet to adjust."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Provision the platform's wallet",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{walletBase}}/v1/wallets/me",
+              "host": [
+                "{{walletBase}}"
+              ],
+              "path": [
+                "v1",
+                "wallets",
+                "me"
+              ]
+            },
+            "description": "The platform is a wallet holder like anyone else — its 30% has to land somewhere. `platformUserId` must match `PLATFORM_USER_ID` in infra/deploy/compose/.env, or the split is credited to a wallet nobody reads.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fund the buyer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{walletBase}}/v1/admin/wallets/{{userId}}/adjust",
+              "host": [
+                "{{walletBase}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "wallets",
+                "{{userId}}",
+                "adjust"
+              ]
+            },
+            "description": "500,000 IRR, enough for everything in this collection.\n\nThrough the admin adjustment endpoint rather than a database write, so the ledger entry exists and the wallet's own reconciliation stays meaningful.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"direction\": \"CREDIT\",\n  \"amount\": {\n    \"amount_minor\": \"50000000\",\n    \"currency\": \"IRR\"\n  },\n  \"reason\": \"seed balance for exercising the store collection\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Publishing a game",
+      "description": "Requirement 1.3, in the order it actually happens. A game cannot skip a step: the state machine refuses, and the reason code tells you which rule you hit.",
+      "item": [
+        {
+          "name": "Create a draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games"
+              ]
+            },
+            "description": "A draft is private and has no price. Only the developer who created it can see it, which is why every other request in this folder uses the developer token.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Neon Drift\",\n  \"description\": \"A synthwave racer through a city that never stops raining.\",\n  \"genres\": [\n    \"RACING\",\n    \"ACTION\"\n  ],\n  \"tags\": [\n    \"synthwave\",\n    \"singleplayer\"\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('gameId', body.id);",
+                  "pm.test('gameId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('gameId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update the draft",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}"
+              ]
+            },
+            "description": "Editable while it is a draft. Once submitted for review it is not: a reviewer must be looking at the same thing the developer submitted.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"A synthwave racer. Now with a rival AI that learns your line.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add a version",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/versions",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "versions"
+              ]
+            },
+            "description": "A game needs at least one version before it can be submitted — there is nothing to review otherwise.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version\": \"1.0.0\",\n  \"file_ref\": \"{{buildId}}\",\n  \"size_bytes\": 4294967296,\n  \"notes\": \"First release.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('versionId', body.versions[body.versions.length - 1].id);",
+                  "pm.test('versionId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('versionId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submit for review",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/submit",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "submit"
+              ]
+            },
+            "description": "Hands the game to the review queue. The developer can no longer edit it.\n\nTry this on a game with no version to see `GAME_HAS_NO_VERSION` rather than a generic refusal.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "See the review queue",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/review-queue",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "review-queue"
+              ]
+            },
+            "description": "Staff only. A developer asking for this gets a 403 — the queue is other developers' unreleased work.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start the review",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/review/start",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "review",
+                "start"
+              ]
+            },
+            "description": "Claims the game so two reviewers do not work on it at once. Records who is reviewing, which is the audit trail requirement 1.3 asks for.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approve it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/review/approve",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "review",
+                "approve"
+              ]
+            },
+            "description": "Approved is not published. The developer still has to set a price and press publish — approval is permission, not a release.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Content policy check passed.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Support suggests a price",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/suggest-price",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "suggest-price"
+              ]
+            },
+            "description": "Requirement 1.3's pricing conversation, and it runs the direction that is easy to get backwards: **staff suggest, the developer decides.**\n\nAdvisory only — it does not set anything. A reviewer who could price somebody else's game would be taking a business decision on their behalf. Sent with the support token; a developer calling this on their own game gets a 403.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount_minor\": 900000,\n  \"currency\": \"IRR\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set the final price",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/price",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "price"
+              ]
+            },
+            "description": "10,000 IRR. Integer minor units and a string, like every amount on the platform.\n\nOnly possible once the game is approved, and only by its developer.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount_minor\": 1000000,\n  \"currency\": \"IRR\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Publish",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/publish",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "publish"
+              ]
+            },
+            "description": "Now it is for sale. Publishing emits `GamePublished`, which is what the recommendation and notification services listen for.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Browse the store",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games?limit=20&offset=0",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Public and unauthenticated — a storefront that requires a login to browse is not a storefront. Published games only; a draft or a game in review is never in here.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "One game",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}"
+              ]
+            },
+            "description": "The game itself, and nothing else. What a list row or a search result renders from.\n\nSeparate from `/detail` on purpose: that one joins versions, media and the live promotion, and a browse page paying for all of it on every row would be the platform's slowest query for no benefit.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The game with its review history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/detail",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "detail"
+              ]
+            },
+            "description": "The game plus its review trail — who reviewed it, when, and why they decided what they did.\n\n**Its developer and staff only, and authenticated**, which is what separates it from `GET /v1/games/{id}`: a rejection note is a conversation between a reviewer and a developer, and publishing it on the store page would expose both of them.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My games",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/mine",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "mine"
+              ]
+            },
+            "description": "A developer's own catalogue, drafts and rejections included. The only place an unpublished game is visible.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject a submission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/review/reject",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "review",
+                "reject"
+              ]
+            },
+            "description": "Refused here, because this game is already published — run it against a second game in `IN_REVIEW` to see it work.\n\nA rejection carries a reason the developer can act on. A rejection with no explanation produces a resubmission of the same thing.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Placeholder art in the trailer.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Appeal a rejection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/appeal",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "appeal"
+              ]
+            },
+            "description": "Requirement 1.3 gives the developer a route back. An appeal returns the game to the queue rather than approving it — a reviewer still decides.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"The placeholder art was replaced in version 1.0.1.\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Media",
+      "description": "Requirement 1.8. Screenshots are public; a build is not, and the difference is enforced rather than assumed.",
+      "item": [
+        {
+          "name": "Upload a screenshot",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mediaBase}}/v1/media",
+              "host": [
+                "{{mediaBase}}"
+              ],
+              "path": [
+                "v1",
+                "media"
+              ]
+            },
+            "description": "`sample-screenshot.png` sits next to this collection and is referenced by name, so the request works unattended — pick your own file in the Body tab to try something else.\n\nThe content type is decided from the **first bytes of the file**, not from what the uploader called it. An HTML page announced as a PNG is refused before a single byte is written, which is what stops a stored-XSS payload being served from the platform's own origin.\n\nAn image defaults to `PUBLIC`: a store page has to be able to show it.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "sample-screenshot.png"
+                },
+                {
+                  "key": "kind",
+                  "value": "IMAGE",
+                  "type": "text"
+                },
+                {
+                  "key": "reference_id",
+                  "value": "{{gameId}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('mediaId', body.id);",
+                  "pm.test('mediaId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('mediaId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload a build",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mediaBase}}/v1/media",
+              "host": [
+                "{{mediaBase}}"
+              ],
+              "path": [
+                "v1",
+                "media"
+              ]
+            },
+            "description": "Uses `sample-build.zip` from the same folder.\n\nSame endpoint, different default: a binary is `PRIVATE`. An unreleased build reachable by URL is the one leak that cannot be undone.\n\nStreamed in chunks and size-checked **while writing**, so a client that lies about `Content-Length` does not get the whole file onto disk before being told no.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "sample-build.zip"
+                },
+                {
+                  "key": "kind",
+                  "value": "GAME_BINARY",
+                  "type": "text"
+                },
+                {
+                  "key": "reference_id",
+                  "value": "{{gameId}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('buildId', body.id);",
+                  "pm.test('buildId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('buildId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My storage quota",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mediaBase}}/v1/media/usage",
+              "host": [
+                "{{mediaBase}}"
+              ],
+              "path": [
+                "v1",
+                "media",
+                "usage"
+              ]
+            },
+            "description": "How much of their share this developer has used.\n\nExposed because a quota nobody can see is one you discover by having an upload refused after the bytes have already gone over the wire. Deleted media does not count — they gave the space back.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My uploads",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mediaBase}}/v1/media?limit=20&offset=0",
+              "host": [
+                "{{mediaBase}}"
+              ],
+              "path": [
+                "v1",
+                "media"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "The caller's own files, public and private alike.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A game's public media",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mediaBase}}/v1/media/by-reference/{{gameId}}",
+              "host": [
+                "{{mediaBase}}"
+              ],
+              "path": [
+                "v1",
+                "media",
+                "by-reference",
+                "{{gameId}}"
+              ]
+            },
+            "description": "How a store page fetches screenshots. **Public objects only, whoever asks** — the build sitting behind them must not appear here even for the developer, because one accidental use of this endpoint on an authenticated page would leak it.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Describe one file",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mediaBase}}/v1/media/{{buildId}}",
+              "host": [
+                "{{mediaBase}}"
+              ],
+              "path": [
+                "v1",
+                "media",
+                "{{buildId}}"
+              ]
+            },
+            "description": "A file the caller may not read is reported **not found**, not forbidden. \"Forbidden\" confirms the id is real, which is enough to tell somebody enumerating ids that they have found an unreleased build.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get a download ticket",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{mediaBase}}/v1/media/{{buildId}}/ticket",
+              "host": [
+                "{{mediaBase}}"
+              ],
+              "path": [
+                "v1",
+                "media",
+                "{{buildId}}",
+                "ticket"
+              ]
+            },
+            "description": "A short-lived signed URL — the local equivalent of an S3 presigned URL.\n\nAuthorisation happens **here, once**, rather than on every byte of a download that may take twenty minutes. The token is the proof that it happened, and it is signed with a secret separate from `JWT_SECRET`: a download token is not an identity token, and one leaking must not compromise the other.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('downloadUrl', body.url);",
+                  "console.log('Signed URL (expires shortly): ' + body.url);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Download the public screenshot",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mediaBase}}/v1/media/{{mediaId}}/content",
+              "host": [
+                "{{mediaBase}}"
+              ],
+              "path": [
+                "v1",
+                "media",
+                "{{mediaId}}",
+                "content"
+              ]
+            },
+            "description": "No token at all. Public means public, and requiring one would break every `<img>` tag on the store.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Download a private build without a ticket",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mediaBase}}/v1/media/{{buildId}}/content",
+              "host": [
+                "{{mediaBase}}"
+              ],
+              "path": [
+                "v1",
+                "media",
+                "{{buildId}}",
+                "content"
+              ]
+            },
+            "description": "Refused. This request exists to be refused: it is the check that the private default actually means something.\n\nPaste the `url` from **Get a download ticket** into a browser to see the signed version succeed.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('a private build is not readable anonymously', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([401, 403, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Attach media to the game",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/media",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "media"
+              ]
+            },
+            "description": "The catalog records the reference; the media service holds the bytes. Neither stores the other's job.\n\nThis is the Anti-Corruption Layer in practice: the catalog knows a media id and nothing about checksums, magic bytes or where a file lives on disk.\n\nThe two services also keep their **own** vocabularies — this `kind` is the catalog's `IMAGE`/`TEASER`, not the media service's `IMAGE`/`GAME_BINARY`/`TRAILER`. They overlap without being the same enum, which is the whole point of translating at the boundary rather than sharing a type.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"media_ref\": \"{{mediaId}}\",\n  \"kind\": \"IMAGE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete a file",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{mediaBase}}/v1/media/{{mediaId}}",
+              "host": [
+                "{{mediaBase}}"
+              ],
+              "path": [
+                "v1",
+                "media",
+                "{{mediaId}}"
+              ]
+            },
+            "description": "Soft delete: the row stays so a reference to it resolves to \"deleted\" rather than a 404 an operator cannot explain. The space is given back to the owner's quota immediately.\n\nSkip this if you want the store page to keep its screenshot.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Buying a game",
+      "description": "Requirement 1.4 and §6.1. A purchase is a saga across three services, so it comes back `202 Accepted` and completes a moment later.",
+      "item": [
+        {
+          "name": "Quote it first",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/quotes/{{gameId}}",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "quotes",
+                "{{gameId}}"
+              ]
+            },
+            "description": "What this would cost, **charging nothing**. What a basket page calls.\n\nAdd `?discount_code=...` to preview a code. Previewing does not consume it — a buyer who opened the page and changed their mind has not lost their reward."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buy it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders"
+              ]
+            },
+            "description": "`202 Accepted`, not `201`. The order exists; the money has not moved yet.\n\nDebit the buyer → grant the game → credit the developer 70% and the platform 30%. Each step is idempotent and each has a compensation, so a failure after the debit refunds rather than leaving somebody charged for nothing.\n\nSend this twice with the **same** `Idempotency-Key` and you get the original order back, not a second purchase. Sending it twice with different keys is refused with `GAME_ALREADY_OWNED` — which is the world's state, not a replay.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"game_id\": \"{{gameId}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 202', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('orderId', body.id);",
+                  "pm.test('orderId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('orderId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Watch it complete",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders/{{orderId}}",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "Re-runs itself until the order reaches a settled state, which is how a collection waits for a saga: there is no sleep in the Postman sandbox, so the test re-queues this request and gives up after twenty passes rather than looping forever.\n\nIn Postman by hand you can just press Send again a second later.\n\nStaff see the saga's step as well, because a support agent with a customer on the line needs to know a `PENDING` order is stuck at ownership. A buyer does not, and it exposes how the platform is put together."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const until = ['COMPLETED', 'FAILED'];",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "const waiting = !until.includes(body.state) && attempts < 40;",
+                  "if (waiting) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts + 1);",
+                  "    pm.execution.setNextRequest(pm.info.requestName);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "}",
+                  "if (!waiting) {",
+                  "    pm.test('the shares add up to what was charged', function () {",
+                  "        const dev = Number(body.developer_share.amount_minor);",
+                  "        const plat = Number(body.platform_share.amount_minor);",
+                  "        pm.expect(dev + plat).to.equal(Number(body.total_charged.amount_minor));",
+                  "    });",
+                  "    pm.test('the sale completed', function () {",
+                  "        pm.expect(body.state).to.equal('COMPLETED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My library",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/library",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "library"
+              ]
+            },
+            "description": "The game is here once the saga finishes, not before."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders?limit=20&offset=0",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Orders the caller paid for, **plus gifts sent to them** — a recipient is entitled to see the order that gave them the game, and who sent it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check saleability",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/saleability",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "saleability"
+              ]
+            },
+            "description": "The internal question the order service asks before every purchase: is this for sale, what does it cost right now, does this user already own it.\n\nOne call rather than three, because it is on the critical path of every purchase on the platform.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refund it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders/{{orderId}}/refund",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders",
+                "{{orderId}}",
+                "refund"
+              ]
+            },
+            "description": "Requirement 1.4's twelve-hour window. Returns the money, takes the game back, and claws back both revenue shares.\n\nThe order says `REFUNDING` until the **buyer's** credit is confirmed. The two reversals proceed independently: a developer who has already spent their share cannot be debited, the wallet records that as a shortfall for an operator, and it must not stop a buyer being told their money is back when it is."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Gifts",
+      "description": "Requirement 1.4. The same saga with a different recipient, plus a 2% fee if a message is attached.",
+      "item": [
+        {
+          "name": "Send a game as a gift",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{orderBase}}/v1/gifts",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "gifts"
+              ]
+            },
+            "description": "The **recipient** gets the game; the **buyer** pays. The recipient does not have to own it already and cannot decline it — requirement 1.4 on both counts.\n\nThe message costs 2%, capped at 500 words. The fee goes entirely to the platform: it pays for a platform feature, and a developer's income should not change because a buyer chose to attach a note.\n\nA gift to yourself is refused rather than quietly charged the 2% for a message nobody reads.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"game_id\": \"{{gameId}}\",\n  \"recipient_id\": \"{{friendId}}\",\n  \"message\": \"Happy birthday. Try the rain level with the sound up.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 202', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('giftOrderId', body.id);",
+                  "pm.test('giftOrderId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('giftOrderId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The gift order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders/{{giftOrderId}}",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders",
+                "{{giftOrderId}}"
+              ]
+            },
+            "description": "`total_charged` is the price plus the message fee; `developer_share` is 70% of the **price**, not of the total.\n\nWaits for the saga, because the next request cannot demonstrate its rule until this one has: a refund of an order that has not completed is refused for being incomplete, which says nothing about gifts."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const until = ['COMPLETED', 'FAILED'];",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "const waiting = !until.includes(body.state) && attempts < 40;",
+                  "if (waiting) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts + 1);",
+                  "    pm.execution.setNextRequest(pm.info.requestName);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "}",
+                  "if (!waiting) {",
+                  "    pm.test('the message fee went to the platform', function () {",
+                  "        const price = Number(body.base_price.amount_minor);",
+                  "        const total = Number(body.total_charged.amount_minor);",
+                  "        const dev = Number(body.developer_share.amount_minor);",
+                  "        pm.expect(total).to.be.above(price);",
+                  "        pm.expect(dev).to.equal(Math.round(price * 0.7));",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Try to refund a gift",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders/{{giftOrderId}}/refund",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders",
+                "{{giftOrderId}}",
+                "refund"
+              ]
+            },
+            "description": "Refused, with `GIFT_NOT_REFUNDABLE`.\n\nNot an arbitrary restriction: the game is already in somebody else's library, and taking it back would punish the recipient for the buyer's change of mind."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('a gift cannot be refunded', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([409, 422]);",
+                  "    pm.expect(pm.response.text()).to.include('GIFT_NOT_REFUNDABLE');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Pre-orders",
+      "description": "Requirement 1.5. The money is **reserved**, not spent, until the game ships.\n\nThis folder builds its own game, because a game cannot be both published and open for pre-order — the state machine refuses, and borrowing the one from folder 1 would leave every request here failing for a reason that has nothing to do with pre-orders.",
+      "item": [
+        {
+          "name": "Create Neon Drift II",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games"
+              ]
+            },
+            "description": "Its own game, so this folder runs independently of the others.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Neon Drift II\",\n  \"description\": \"Neon Drift II, for this folder's own use.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('preorderGameId', body.id);",
+                  "pm.test('preorderGameId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('preorderGameId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add its version",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{preorderGameId}}/versions",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{preorderGameId}}",
+                "versions"
+              ]
+            },
+            "description": "A game needs one before it can be submitted — there is nothing to review otherwise.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version\": \"1.0.0\",\n  \"file_ref\": \"{{buildId}}\",\n  \"size_bytes\": 1073741824\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submit it",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{preorderGameId}}/submit",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{preorderGameId}}",
+                "submit"
+              ]
+            },
+            "description": "Into the review queue.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start its review",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{preorderGameId}}/review/start",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{preorderGameId}}",
+                "review",
+                "start"
+              ]
+            },
+            "description": "Claimed, so two reviewers do not work on it at once.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approve it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{preorderGameId}}/review/approve",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{preorderGameId}}",
+                "review",
+                "approve"
+              ]
+            },
+            "description": "Approved is not published — the developer still decides when.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Approved.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Price it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{preorderGameId}}/price",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{preorderGameId}}",
+                "price"
+              ]
+            },
+            "description": "15,000 IRR, in integer minor units.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount_minor\": 1500000,\n  \"currency\": \"IRR\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Open pre-orders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{preorderGameId}}/preorders",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{preorderGameId}}",
+                "preorders"
+              ]
+            },
+            "description": "Purchasable, but not released.\n\nThe order service refuses a mismatch in **both** directions: pressing \"buy\" on something unreleased must not hold funds for weeks unexpectedly, and pressing \"pre-order\" on a released game must not defer a payment the buyer expected to make now.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"release_at\": \"2027-01-01T00:00:00Z\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Place a pre-order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{orderBase}}/v1/preorders",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "preorders"
+              ]
+            },
+            "description": "A **hold**, not a debit. The buyer cannot spend the same balance twice, and the platform is not sitting on cash for a game that may never arrive. The price and the 70/30 split are decided now; only the moment the money moves is deferred.\n\n`PENDING` becomes `RESERVED` once the wallet confirms the hold. Not available as a gift: a gift is announced when it lands, and this lands weeks later.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"game_id\": \"{{preorderGameId}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 202', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('preorderId', body.id);",
+                  "pm.test('preorderId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('preorderId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Watch it reserve",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders/{{preorderId}}",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders",
+                "{{preorderId}}"
+              ]
+            },
+            "description": "`RESERVED`, and `refund_deadline` is **null** — deliberately. A reserved pre-order advertising a refund deadline would be actively misleading, because the way out of one is a cancellation, not a refund."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const until = ['RESERVED', 'FAILED'];",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "const waiting = !until.includes(body.state) && attempts < 40;",
+                  "if (waiting) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts + 1);",
+                  "    pm.execution.setNextRequest(pm.info.requestName);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "}",
+                  "if (!waiting) {",
+                  "    pm.test('the funds are reserved', function () {",
+                  "        pm.expect(body.state).to.equal('RESERVED');",
+                  "    });",
+                  "    pm.test('a reservation has no refund deadline', function () {",
+                  "        pm.expect(body.refund_deadline == null).to.be.true;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check the hold on the wallet",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{walletBase}}/v1/wallets/me",
+              "host": [
+                "{{walletBase}}"
+              ],
+              "path": [
+                "v1",
+                "wallets",
+                "me"
+              ]
+            },
+            "description": "`available` is lower than `balance` by the price of the pre-order. That gap is the hold: the money is still theirs and they cannot spend it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Release the game",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{preorderGameId}}/release",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{preorderGameId}}",
+                "release"
+              ]
+            },
+            "description": "Ships it, and this is what turns **every** hold against the game into a real purchase: the catalog emits `GameReleased`, and the order service captures each hold, grants the game and pays out the split.\n\nOne event, an unbounded number of orders — which is why that path is batched, and why the batch loop is bounded rather than trusted to terminate.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The pre-order is now a purchase",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders/{{preorderId}}",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders",
+                "{{preorderId}}"
+              ]
+            },
+            "description": "`COMPLETED`, the money captured from the hold, the game in the library, and the twelve-hour refund window now running from here."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const until = ['COMPLETED', 'FAILED'];",
+                  "const attempts = Number(pm.collectionVariables.get('pollAttempts') || 0);",
+                  "const waiting = !until.includes(body.state) && attempts < 40;",
+                  "if (waiting) {",
+                  "    pm.collectionVariables.set('pollAttempts', attempts + 1);",
+                  "    pm.execution.setNextRequest(pm.info.requestName);",
+                  "} else {",
+                  "    pm.collectionVariables.set('pollAttempts', 0);",
+                  "}",
+                  "if (!waiting) {",
+                  "    pm.test('the hold was captured and the sale completed', function () {",
+                  "        pm.expect(body.state).to.equal('COMPLETED');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel a pre-order",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders/{{preorderId}}/cancel",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders",
+                "{{preorderId}}",
+                "cancel"
+              ]
+            },
+            "description": "Refused here, because this one has already shipped — which is the rule, not a problem with the request. Run it while an order is still `RESERVED` to see it work.\n\nThe hold is **released**, not refunded: nothing was ever taken, so there is nothing to give back. Once the game has shipped the way out is the ordinary twelve-hour refund."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Instalments",
+      "description": "Requirement 3.3. The game is handed over after the **first** payment and the rest is collected on a schedule.\n\nIts own game again, for the plainest possible reason: the buyer already owns folder 1's, and you cannot buy a game twice.",
+      "item": [
+        {
+          "name": "Create Neon Drift: Rain Cup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games"
+              ]
+            },
+            "description": "Its own game, so this folder runs independently of the others.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Neon Drift: Rain Cup\",\n  \"description\": \"Neon Drift: Rain Cup, for this folder's own use.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('planGameId', body.id);",
+                  "pm.test('planGameId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('planGameId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add its version",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{planGameId}}/versions",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{planGameId}}",
+                "versions"
+              ]
+            },
+            "description": "A game needs one before it can be submitted — there is nothing to review otherwise.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version\": \"1.0.0\",\n  \"file_ref\": \"{{buildId}}\",\n  \"size_bytes\": 1073741824\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submit it",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{planGameId}}/submit",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{planGameId}}",
+                "submit"
+              ]
+            },
+            "description": "Into the review queue.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start its review",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{planGameId}}/review/start",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{planGameId}}",
+                "review",
+                "start"
+              ]
+            },
+            "description": "Claimed, so two reviewers do not work on it at once.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approve it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{planGameId}}/review/approve",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{planGameId}}",
+                "review",
+                "approve"
+              ]
+            },
+            "description": "Approved is not published — the developer still decides when.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Approved.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Price it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{planGameId}}/price",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{planGameId}}",
+                "price"
+              ]
+            },
+            "description": "12,000 IRR, in integer minor units.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount_minor\": 1200000,\n  \"currency\": \"IRR\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Publish it",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{planGameId}}/publish",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{planGameId}}",
+                "publish"
+              ]
+            },
+            "description": "On sale.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buy on a payment plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{orderBase}}/v1/instalment-orders",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "instalment-orders"
+              ]
+            },
+            "description": "A quarter of the price now, the game immediately, three more payments over the next three months.\n\nWithholding the game until the last payment would be layaway, not instalment credit. The cost of handing it over early is default risk: miss a payment for longer than the grace period and **the entitlement is revoked and what was already paid is not returned**. That is the deal, and it is stated plainly because it is the part a buyer needs to know.\n\nThe developer is paid 70% of each payment **as it lands**, not of the price up front — paying that early would mean the platform lending them money and carrying the buyer's default risk.\n\nNot available as a gift, on a pre-order, or with a discount code. Three plans per buyer at once.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"game_id\": \"{{planGameId}}\",\n  \"instalments\": 4,\n  \"interval_days\": 30\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 202', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('planOrderId', body.id);",
+                  "pm.test('planOrderId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('planOrderId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The schedule",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders/{{planOrderId}}/instalment-plan",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders",
+                "{{planOrderId}}",
+                "instalment-plan"
+              ]
+            },
+            "description": "Every payment, what it is worth, when it is due, and whether it landed.\n\n`defaults_at` is the field that matters most: when the game gets taken back if nothing changes. `paid` and `outstanding` always add up to `total`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('paid and outstanding add up to the total', function () {",
+                  "    const paid = Number(body.paid.amount_minor);",
+                  "    const left = Number(body.outstanding.amount_minor);",
+                  "    pm.expect(paid + left).to.equal(Number(body.total.amount_minor));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The order while it is being paid",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders/{{planOrderId}}",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders",
+                "{{planOrderId}}"
+              ]
+            },
+            "description": "`PAYING`, not `COMPLETED`. The buyer has the game; the platform has not been paid for it.\n\nDeliberately a distinct state: a revenue report that counted this as a completed sale would overstate income by the whole outstanding balance."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Everything I am paying off",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/instalment-plans",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "instalment-plans"
+              ]
+            },
+            "description": "Closed plans included. A buyer asking what they are paying for also wants what they finished paying for — and a defaulted plan is the one thing they most need to be able to find an explanation of."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pay it off early",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/orders/{{planOrderId}}/pay-off",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "orders",
+                "{{planOrderId}}",
+                "pay-off"
+              ]
+            },
+            "description": "Settles everything outstanding at once. Not asked for by the requirement, but a plan you cannot pay off early is a worse product than one you can, and it costs nothing: the amounts and splits were fixed when the plan was drawn up, so settling together moves the same money in the same proportions.\n\nA wallet that cannot cover the lot pays off what it can; the rest go back to due, which is the same handling as any other refused payment."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Collect what is due now",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/admin/instalments/collect",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "instalments",
+                "collect"
+              ]
+            },
+            "description": "Runs the collection sweep immediately instead of waiting for the timer.\n\nStaff only, and it exists for the same reason the saga sweep's endpoint does: when something is wrong at two in the morning, waiting out an interval to find out whether a fix worked is not debugging.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. Promotions and withdrawal",
+      "description": "Requirement 1.9. A festival discount needs the developer's agreement, because they bear 70% of it.",
+      "item": [
+        {
+          "name": "Propose a discount",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/promotions",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "promotions"
+              ]
+            },
+            "description": "25% off, in **basis points** — 2500, exactly, with no float anywhere near a price.\n\nProposed, not applied. The developer has to approve it, because the 70/30 split applies to the reduced price and they carry 70% of the reduction. A platform that could discount a game unilaterally would be spending somebody else's money.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"discount_bps\": 2500,\n  \"starts_at\": \"2026-08-01T00:00:00Z\",\n  \"ends_at\": \"2026-08-08T00:00:00Z\",\n  \"note\": \"Summer festival\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('promotionId', body.promotions.find((p) => p.state === 'PENDING').id);",
+                  "pm.test('promotionId was captured', function () {",
+                  "    pm.expect(pm.collectionVariables.get('promotionId')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Developer approves it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/promotions/{{promotionId}}/approve",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "promotions",
+                "{{promotionId}}",
+                "approve"
+              ]
+            },
+            "description": "Now it is live inside its window. The **discount** is rounded rather than the result, and where two promotions overlap the largest wins — decided rather than left to whichever row came back first.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Happy to run this one.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Developer rejects it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/promotions/{{promotionId}}/reject",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "promotions",
+                "{{promotionId}}",
+                "reject"
+              ]
+            },
+            "description": "The other half of the same decision. A rejected promotion never applies.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Not while the launch discount is running.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Cancel a promotion",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/promotions/{{promotionId}}",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "promotions",
+                "{{promotionId}}"
+              ]
+            },
+            "description": "Ends it early. A sale already made at the discounted price stays as it was — an order's money never changes after the fact.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Withdraw the game",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/withdraw",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "withdraw"
+              ]
+            },
+            "description": "Off sale. **Everyone who already bought it keeps it** — and a buyer whose purchase was in flight when the game was withdrawn still gets it, because they paid before it happened.\n\nDistinct from a rejection: nothing is wrong with the submission, the developer has pulled it.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"A licensing problem with the soundtrack.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Put it back",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/relist",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "relist"
+              ]
+            },
+            "description": "Back on sale at the same price, with no second review — it was already approved.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove a version",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/versions/{{versionId}}",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "versions",
+                "{{versionId}}"
+              ]
+            },
+            "description": "Refused if it is the only one: a published game with no version is something nobody can download.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Detach media",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/media/{{mediaId}}",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "media",
+                "{{mediaId}}"
+              ]
+            },
+            "description": "Removes the reference. The bytes are the media service's to delete.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{developerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Staff and support",
+      "description": "What a support agent and an operator need. Every request here is staff-only, and a basic user gets a 403.",
+      "item": [
+        {
+          "name": "Somebody else's library",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/users/{{userId}}/library",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                "{{userId}}",
+                "library"
+              ]
+            },
+            "description": "A support agent answering \"where is my game\". A basic user asking for another user's library is refused.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Somebody else's orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/users/{{userId}}/orders?limit=20&offset=0",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                "{{userId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "The other half of the same question, from the order side.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supportToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Does this user own this game",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{catalogBase}}/v1/games/{{gameId}}/entitlement",
+              "host": [
+                "{{catalogBase}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "{{gameId}}",
+                "entitlement"
+              ]
+            },
+            "description": "The single question a launcher asks. Its own endpoint because it is called far more often than anything else here and needs to stay cheap."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order states at a glance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/admin/order-states",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "order-states"
+              ]
+            },
+            "description": "A count per state. `PENDING` should be near zero; a number that keeps growing means sagas are not finishing.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nudge stalled sagas",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/admin/sagas/sweep",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sagas",
+                "sweep"
+              ]
+            },
+            "description": "Finds sagas that have stopped moving and re-issues the command they are waiting on. Every command is idempotent, so re-issuing is safe.\n\nThis runs on a timer anyway. The endpoint exists so an operator does not have to wait out the interval to find out whether a fix worked.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A basic user tries the admin endpoint",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{orderBase}}/v1/admin/sagas/sweep",
+              "host": [
+                "{{orderBase}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sagas",
+                "sweep"
+              ]
+            },
+            "description": "Refused. Here to prove the role check exists rather than to be assumed — the same endpoint, the same body, a different token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('a basic user is refused', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([401, 403]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
