@@ -14,6 +14,13 @@ COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/d
 # them cannot disagree.
 SERVICE_COUNT := 5
 
+# MinIO, for the migration target. The root credentials come from .env like everything else.
+MC_IMAGE := minio/mc:RELEASE.2025-04-16T18-13-26Z
+MINIO_BUCKET ?= arcadia-media
+COMPOSE_NETWORK := arcadia_default
+MINIO_ROOT_USER := $(shell grep -E "^MINIO_ROOT_USER=" deploy/compose/.env 2>/dev/null | cut -d= -f2-)
+MINIO_ROOT_PASSWORD := $(shell grep -E "^MINIO_ROOT_PASSWORD=" deploy/compose/.env 2>/dev/null | cut -d= -f2-)
+
 .DEFAULT_GOAL := help
 .PHONY: help env images up up-metrics down restart wait nuke logs ps psql topics lint e2e e2e-health e2e-install
 
@@ -47,7 +54,7 @@ images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../order-service docker
 	$(MAKE) -C ../media-service docker
 
-up: env ## Start Postgres, Redis, Kafka and all five services
+up: env ## Start Postgres, Redis, Kafka, MinIO and all five services
 	$(COMPOSE) up -d
 	@echo
 	@echo "  wallet   REST http://localhost:8080   gRPC localhost:9090"
@@ -55,6 +62,9 @@ up: env ## Start Postgres, Redis, Kafka and all five services
 	@echo "  catalog  REST http://localhost:8082   docs /docs"
 	@echo "  order    REST http://localhost:8083   docs /docs"
 	@echo "  media    REST http://localhost:8084   docs /docs"
+	@echo
+	@echo "  minio    S3   http://localhost:9000   console http://localhost:9001"
+	@echo "           log in with MINIO_ROOT_USER / MINIO_ROOT_PASSWORD from .env"
 	@echo
 	@echo "  make wait   # block until every service is healthy"
 
@@ -91,6 +101,19 @@ ps: ## Show container status
 
 psql: ## Open psql against the wallet database
 	$(COMPOSE) exec postgres psql -U wallet_user -d arcadia_wallet
+
+media-migrate: ## Copy files from the media-data volume into the MinIO bucket
+	@# For switching STORAGE_BACKEND from filesystem to s3 on a stack that already has files.
+	@# Without this the metadata rows survive and their bytes do not: every download 404s, and
+	@# `make e2e` says so — `test_no_media_row_lacks_its_bytes` is the check that catches it.
+	@#
+	@# `mc mirror` rather than `cp`: it skips what is already there, so running this twice is
+	@# safe and interrupting it is recoverable. The sharded layout is preserved as-is, because
+	@# the object key in the database is exactly that path.
+	@echo "mirroring the media-data volume into the $(MINIO_BUCKET) bucket"
+	@docker run --rm --network $(COMPOSE_NETWORK) 		-v arcadia_media-data:/from:ro 		-e MC_HOST_target="http://$(MINIO_ROOT_USER):$(MINIO_ROOT_PASSWORD)@minio:9000" 		--entrypoint /bin/sh $(MC_IMAGE) -c 		'mc mirror --overwrite --exclude ".tmp/*" --exclude ".readyz" /from target/$(MINIO_BUCKET)'
+	@echo
+	@echo "done. 'make e2e' will confirm every metadata row has its bytes."
 
 topics: ## List Kafka topics
 	$(COMPOSE) exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list

@@ -42,23 +42,38 @@ platform is actually up rather than merely started.
 curl -s localhost:8080/readyz
 ```
 
-To exercise the API, import [`wallet-service/api/postman`](../wallet-service/api/postman)
-and run **Setup → Mint tokens**.
+**MinIO** backs the media service's object store: S3 API on http://localhost:9000, console on
+http://localhost:9001, logging in with `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` from `.env`.
+
+The image is **pinned to `RELEASE.2025-04-22T22-12-26Z`, deliberately an old one.** MinIO stripped
+the management features out of the community console in mid-2025 — later images serve a console
+that browses objects and little else. This release still administers buckets, policies, users and
+service accounts, which is the only reason to run a console beside a local stack at all.
+
+The services never use the root credentials. `deploy/compose/minio-setup.sh` runs once at
+`make up` and creates the bucket plus a separate user scoped to it, so a leaked service key can
+read and write one bucket and nothing else — it cannot even create a bucket, which is why the
+media service is configured with `S3_CREATE_BUCKET=false` and fails loudly on a typo in the
+bucket name instead of quietly starting an empty store.
+
+To exercise the API, import [`wallet-service/api/postman`](../wallet-service/api/postman) and
+[`api/postman`](api/postman), then run **Setup → Mint tokens** in each.
 
 ## What runs, and what it costs
 
-Eight containers by default, roughly 1.8 GB with the limits set in the compose file:
+Nine containers by default, roughly 2.5 GB with the limits set in the compose file:
 
 | | Memory limit | |
 |---|---|---|
 | `postgres` | 384M | one database and role per service, five of them |
 | `kafka` | 640M | KRaft mode, no ZooKeeper, one partition per topic |
 | `redis` | 96M | gift-card rate-limit windows only, no persistence |
+| `minio` | 512M | the object store; pinned to a release that still has an admin console |
 | `wallet-service` | 128M | Go |
 | `payment-service` | 128M | Go |
 | `catalog-service` | 160M | Python; one uvicorn worker |
 | `order-service` | 160M | Python; one uvicorn worker |
-| `media-service` | 160M | Python; uploads stream, so this does not scale with file size |
+| `media-service` | 224M | Python; uploads stream, so this does not scale with file size |
 
 The Python services get 160M rather than 128M because a CPython process with SQLAlchemy and
 aiokafka loaded starts higher than a Go binary does. One uvicorn worker each: a second worker
@@ -67,7 +82,19 @@ anything the service is short of.
 
 The media service is the one worth watching. Its limit does **not** scale with upload size —
 uploads and downloads both stream in 1 MiB chunks, so a 4 GB game build passes through a
-160 MB container. What does grow is its **disk**, which is why it has a volume and an alert.
+224 MB container. It gets 224M rather than 160M because the S3 adapter buffers one 8 MiB part per
+concurrent upload before escalating to multipart, and botocore's service model is a few MB
+resident.
+
+**MinIO is the single biggest cost of the stack**, and it is optional. Set
+`MEDIA_STORAGE_BACKEND=filesystem` in `.env` to drop it and get 512 MB back; the media service
+falls back to the `media-data` volume and the platform works exactly as before. What you lose is
+the ability to run more than one replica of it — two on different hosts do not see each other's
+files — and a store that can outgrow one disk. Switching an existing store needs
+`make media-migrate` to copy the objects across, or every download 404s.
+
+Also worth knowing: with the filesystem backend the media volume shares a disk with Postgres, so
+filling it stops the database from writing. That is what the per-developer quota is for.
 
 Metrics are opt-in and add two more:
 

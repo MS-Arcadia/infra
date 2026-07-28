@@ -156,17 +156,19 @@ def test_no_entitlement_is_duplicated():
 
 
 def test_no_media_row_lacks_its_bytes():
-    """A row whose file is gone is a broken download for something the catalogue lists."""
-    import subprocess
+    """A row whose file is gone is a broken download for something the catalogue lists.
 
+    Asks the store where the bytes are rather than assuming a directory. This walked the
+    media-data volume with `test -f` and passed for months; the day `STORAGE_BACKEND` became
+    `s3` it reported every file on the platform as missing — accurate about the volume, wrong
+    about the platform. `stored_object_keys` reads whichever backend is running, which also makes
+    this the check that catches a backend switched without `make media-migrate`.
+    """
     rows = a.psql("media", "SELECT object_key FROM media_objects WHERE deleted_at IS NULL")
-    keys = [k for k in rows.splitlines() if k]
-    missing = []
-    for key in keys:
-        result = subprocess.run(
-            ["docker", "exec", "arcadia-media", "test", "-f", f"/var/lib/arcadia/media/{key}"],
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            missing.append(key)
-    assert not missing, f"metadata rows with no bytes behind them: {missing}"
+    expected = {key for key in rows.splitlines() if key}
+
+    missing = sorted(expected - a.stored_object_keys())
+    assert not missing, (
+        f"{len(missing)} metadata row(s) with no bytes behind them "
+        f"in the {a.media_backend()} store: {missing[:10]}"
+    )

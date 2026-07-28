@@ -37,6 +37,16 @@ PLATFORM_USER = "00000000-0000-4000-8000-000000000001"
 
 KAFKA_CONTAINER = "arcadia-kafka"
 POSTGRES_CONTAINER = "arcadia-postgres"
+MEDIA_CONTAINER = "arcadia-media"
+MINIO_CONTAINER = "arcadia-minio"
+MINIO_BUCKET = "arcadia-media"
+MEDIA_STORAGE_ROOT = "/var/lib/arcadia/media"
+
+# MinIO's root credentials, matching deploy/compose/.env.example — the same way this file
+# already hardcodes JWT_SECRET. Root rather than the media service's own key because listing a
+# bucket is deliberately not in that key's policy.
+MINIO_ROOT_USER = "arcadia-root"
+MINIO_ROOT_PASSWORD = "local-development-minio-root-change-me"
 
 
 def new_id() -> str:
@@ -202,6 +212,68 @@ def psql(database: str, sql: str) -> str:
     return result.stdout.strip()
 
 
+def media_backend() -> str:
+    """Which object store the running media service was configured with.
+
+    Read off the container rather than from .env, so an assertion follows the stack that is
+    actually up instead of whatever the file says today.
+    """
+    result = subprocess.run(
+        ["docker", "inspect", MEDIA_CONTAINER, "--format",
+         "{{range .Config.Env}}{{println .}}{{end}}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    for line in result.stdout.splitlines():
+        if line.startswith("STORAGE_BACKEND="):
+            return line.split("=", 1)[1].strip()
+    return "filesystem"
+
+
+def stored_object_keys() -> set[str]:
+    """Every key the media service's object store actually holds.
+
+    Follows the backend rather than assuming one. With `STORAGE_BACKEND=s3` the bytes are in a
+    MinIO bucket and the media-data volume is empty — the health assertion that walked the volume
+    passed for months and then reported every file on the platform as missing the day the backend
+    changed, which was accurate about the volume and wrong about the platform.
+
+    The MinIO container ships `mc`, so no extra image is needed. Credentials go in as
+    `MC_HOST_<alias>` rather than through `mc alias set`: the container's own `local` alias is
+    unauthenticated — enough for the `mc ready` healthcheck, not enough to list a private bucket —
+    and reconfiguring it would write the root password into the container's config file.
+    """
+    if media_backend() == "s3":
+        result = subprocess.run(
+            ["docker", "exec",
+             "-e", f"MC_HOST_probe=http://{MINIO_ROOT_USER}:{MINIO_ROOT_PASSWORD}@localhost:9000",
+             MINIO_CONTAINER, "mc", "--json", "ls", "--recursive", f"probe/{MINIO_BUCKET}"],
+            capture_output=True,
+            text=True,
+            # Checked below, with a message that names the bucket. `check=True` would raise a
+            # CalledProcessError whose text is the whole argv — root password included.
+            check=False,
+        )
+        if result.returncode != 0:
+            raise AssertionError(f"could not list the media bucket: {result.stderr.strip()}")
+        return {
+            json.loads(line)["key"] for line in result.stdout.splitlines() if line.strip()
+        }
+
+    result = subprocess.run(
+        ["docker", "exec", MEDIA_CONTAINER, "find", MEDIA_STORAGE_ROOT, "-type", "f"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    prefix = MEDIA_STORAGE_ROOT.rstrip("/") + "/"
+    return {
+        line[len(prefix):] for line in result.stdout.splitlines()
+        if line.startswith(prefix) and "/.tmp/" not in line
+    }
+
+
 def topic_message_count(topic: str) -> int:
     result = subprocess.run(
         ["docker", "exec", KAFKA_CONTAINER, "kafka-run-class.sh",
@@ -209,6 +281,9 @@ def topic_message_count(topic: str) -> int:
          "--topic", topic],
         capture_output=True,
         text=True,
+        # A topic that was never created exits non-zero, and for these assertions that genuinely
+        # means zero messages — an empty dead-letter topic is the answer they want.
+        check=False,
     )
     total = 0
     for line in result.stdout.strip().splitlines():

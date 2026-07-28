@@ -65,6 +65,71 @@ services:
         limits:
           memory: 96M
 
+  minio:
+    # Pinned, and to an old release on purpose. MinIO removed the management features from the
+    # community console in mid-2025 — later images serve a console that can browse objects and
+    # little else. This one still has bucket, policy, user and service-account administration,
+    # which is the whole reason to run a console next to a local stack.
+    #
+    # Verified rather than assumed: on this tag `/api/v1/buckets`, `/api/v1/policies`,
+    # `/api/v1/service-accounts` and `/api/v1/admin/info` all answer with a console session.
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: arcadia-minio
+    restart: unless-stopped
+    command: [server, /data, --console-address, ":9001"]
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # The console shows a browser the URLs it hands out, so it has to be the address the
+      # browser can reach — not the one the Docker network uses.
+      MINIO_BROWSER_REDIRECT_URL: http://localhost:${MINIO_CONSOLE_PORT:-9001}
+    healthcheck:
+      # MinIO's own liveness endpoint, not a TCP check: the port is open before the drives are
+      # formatted, and a service that connected in that window would fail its first request.
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - minio-data:/data
+    deploy:
+      resources:
+        limits:
+          # MinIO is the single biggest cost of this change. It idles well under this; the
+          # headroom is for the erasure-coding buffers a multipart upload allocates.
+          memory: 512M
+
+  minio-setup:
+    # Runs once and exits. Creates the bucket and a scoped service account, so the services
+    # never hold the root credentials — a leaked key that can only read and write one bucket is
+    # a different incident from one that can delete every bucket and rewrite policy.
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    container_name: arcadia-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY}
+      MEDIA_S3_SECRET_KEY: ${MEDIA_S3_SECRET_KEY}
+      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-arcadia-media}
+    entrypoint: [/bin/sh, /setup.sh]
+    volumes:
+      - ./minio-setup.sh:/setup.sh:ro
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          # 64M was not enough: `mc admin policy attach` was OOM-killed, and because the script
+          # tolerated a failing attach the stack came up with a bucket the media service could
+          # not write to. mc is a Go binary that loads the whole policy set to attach one.
+          memory: 192M
+
   kafka:
     image: bitnami/kafka:3.7
     container_name: arcadia-kafka
@@ -244,6 +309,17 @@ services:
       # Signs download URLs. Deliberately NOT the same value as JWT_SECRET — the service
       # refuses to boot if they match.
       DOWNLOAD_SECRET: ${MEDIA_DOWNLOAD_SECRET}
+      # S3 here, the filesystem by default in the service. This is the deployment where being
+      # stateless is worth another container; a bare `pytest` needs nothing running.
+      STORAGE_BACKEND: ${MEDIA_STORAGE_BACKEND:-s3}
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${MEDIA_S3_SECRET_KEY}
+      S3_BUCKET: ${MEDIA_S3_BUCKET:-arcadia-media}
+      # minio-setup makes the bucket, with a scoped user that deliberately cannot create one.
+      # Leaving this true would mean a typo in S3_BUCKET quietly starting an empty store.
+      S3_CREATE_BUCKET: "false"
+      # Only read when STORAGE_BACKEND=filesystem. Kept so switching back is one variable.
       STORAGE_ROOT: /var/lib/arcadia/media
       # Must be reachable by a browser following the URLs, not by the Docker network.
       PUBLIC_BASE_URL: http://localhost:${MEDIA_HTTP_PORT:-8084}
@@ -252,16 +328,22 @@ services:
       STORAGE_SOFT_LIMIT_BYTES: ${MEDIA_STORAGE_SOFT_LIMIT_BYTES:-5368709120}
       OWNER_QUOTA_BYTES: ${MEDIA_OWNER_QUOTA_BYTES:-1073741824}
     volumes:
-      # The store is stateful, which is the trade-off of using a filesystem rather than
-      # MinIO. Without this volume every restart loses every uploaded file.
+      # Only used when STORAGE_BACKEND=filesystem, and kept for exactly that: switching the
+      # backend back should be one variable, not a lost store.
       - media-data:/var/lib/arcadia/media
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
+      # `service_completed_successfully`, not `service_healthy`. The bucket and the scoped user
+      # have to exist before this service starts: it is configured not to create the bucket
+      # itself, so starting first means failing readiness until someone restarts it.
+      minio-setup: { condition: service_completed_successfully }
     deploy:
       resources:
         limits:
-          memory: 160M
+          # Up from 160M. The S3 adapter buffers one 8 MiB part per concurrent upload before it
+          # escalates to multipart, and botocore's service model is a few MB resident.
+          memory: 224M
 
   # --- Metrics (profile: metrics) -----------------------------------------
   #
@@ -313,4 +395,7 @@ services:
 volumes:
   postgres-data:
   kafka-data:
+  # Still here, and still used when STORAGE_BACKEND=filesystem. Keeping it means switching the
+  # backend back is one variable rather than a lost store.
   media-data:
+  minio-data:

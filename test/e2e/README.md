@@ -97,6 +97,12 @@ invariants that no API exposes.
 * No order is stuck mid-saga, and no saga was abandoned.
 * No entitlement is duplicated, and no media row lacks its bytes.
 
+That last one reads whichever object store is running. It used to walk the `media-data` volume
+with `test -f` and passed for months; the day `STORAGE_BACKEND` became `s3` it reported every
+file on the platform as missing — accurate about the volume, wrong about the platform. It now
+lists the MinIO bucket instead when that is where the bytes go, which also means it is the check
+that catches a backend switched without `make media-migrate`.
+
 ---
 
 ## Repeatable without resetting
