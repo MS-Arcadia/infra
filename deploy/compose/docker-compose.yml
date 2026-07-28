@@ -197,6 +197,14 @@ services:
       KAFKA_BROKERS: kafka:9092
       PAYMENT_SERVICE_GRPC: payment-service:9091
       JWT_SECRET: ${JWT_SECRET}
+      # The credential this service presents when it calls the Payment Adapter. Left empty here
+      # on purpose: with an empty value the wallet signs its own short-lived SERVICE token from
+      # JWT_SECRET, which is what a stack with no Auth service needs. Set it to inject one from a
+      # real Auth service instead.
+      #
+      # The knob existed and was unreachable — compose never passed it through — which is part of
+      # why every bank top-up failed unauthenticated with no way to configure around it.
+      SERVICE_TOKEN: ${WALLET_SERVICE_TOKEN:-}
       GIFT_CARD_PEPPER: ${GIFT_CARD_PEPPER}
       WALLET_CURRENCY: ${WALLET_CURRENCY:-IRR}
       # Short intervals locally so a reviewer sees the background jobs actually run.

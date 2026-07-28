@@ -125,7 +125,13 @@ argument for keeping them runnable rather than treating them as documentation:
 - **Waiting on a saga asserted on every retry**, so a wait that succeeded on the fourteenth
   attempt still ended the run with thirteen red assertions and nothing to say they were expected.
   Indistinguishable from a genuinely broken release.
-- **Two live bugs in the Go services**, still open: the payment service returns a 500 with a raw
-  Postgres error for a non-UUID id in the URL, and a bank top-up fails with a misleading 401 —
-  the caller authenticated fine; it is the wallet's own call to the payment service that is
-  refused, and a 401 tells a client to re-login when that cannot possibly help.
+- **Two live bugs in the Go services**, since fixed. A non-UUID id in the URL reached PostgreSQL
+  and came back as a 500 with a database error in the log, on six routes across both services —
+  now a 400 from `httpx.PathUUID`, checked at the edge. And **every** bank top-up failed with a
+  401: the wallet's own gRPC call to the Payment Adapter carried no service token at all, so the
+  adapter refused it, and the wallet forwarded that refusal to the buyer as though *their* login
+  had expired. The wallet now signs a short-lived SERVICE token, and a downstream refusing this
+  service is reclassified as 503 rather than blamed on whoever happened to be asking.
+
+  Both were found by running these collections, and both are now covered: the wallet collection
+  goes from 59/64 assertions to **64/64**.
