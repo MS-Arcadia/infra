@@ -12,7 +12,7 @@ COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/d
 
 # How many containers `make wait` expects to go healthy. Named so the two places that count
 # them cannot disagree.
-SERVICE_COUNT := 5
+SERVICE_COUNT := 6
 
 # MinIO, for the migration target. The root credentials come from .env like everything else.
 MC_IMAGE := minio/mc:RELEASE.2025-04-16T18-13-26Z
@@ -48,15 +48,17 @@ env: ## Create .env from the template if it does not exist
 	fi
 
 images: ## Build every service image (each service builds its own)
+	$(MAKE) -C ../auth-profile-service docker
 	$(MAKE) -C ../wallet-service docker
 	$(MAKE) -C ../payment-service docker
 	$(MAKE) -C ../catalog-service docker
 	$(MAKE) -C ../order-service docker
 	$(MAKE) -C ../media-service docker
 
-up: env ## Start Postgres, Redis, Kafka, MinIO and all five services
+up: env ## Start Postgres, Redis, Kafka, MinIO and all six services
 	$(COMPOSE) up -d
 	@echo
+	@echo "  auth     REST http://localhost:8085   docs /docs"
 	@echo "  wallet   REST http://localhost:8080   gRPC localhost:9090"
 	@echo "  payment  REST http://localhost:8081   gRPC localhost:9091"
 	@echo "  catalog  REST http://localhost:8082   docs /docs"

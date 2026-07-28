@@ -92,15 +92,23 @@ def call(
     user: str | None = None,
     role: str = "BASIC_USER",
     scopes: list[str] | None = None,
+    bearer: str | None = None,
     body: dict | None = None,
     key: str | None = None,
     raw_body: bytes | None = None,
     content_type: str | None = None,
     timeout: float = 30.0,
 ) -> Response:
-    """One request. Never raises for an HTTP status — the tests assert on it."""
+    """One request. Never raises for an HTTP status — the tests assert on it.
+
+    `user` mints a token here; `bearer` presents one minted elsewhere. Almost every test wants the
+    first — they are checking the platform, not the issuer — but `test_00_identity.py` needs the
+    second, because the only way to know the auth service produces acceptable tokens is to use one.
+    """
     request = urllib.request.Request(url, method=method)
-    if user:
+    if bearer:
+        request.add_header("Authorization", f"Bearer {bearer}")
+    elif user:
         request.add_header("Authorization", f"Bearer {token(user, role, scopes=scopes)}")
     if key:
         request.add_header("Idempotency-Key", key)
@@ -178,15 +186,16 @@ def multipart(
 def provision_wallet(user_id: str) -> dict:
     """Ensure a wallet exists, by asking for it.
 
-    `GET /v1/wallets/me` provisions on first access, so this is all it takes. In production a
-    wallet is normally created by the wallet service's UserRegistered consumer, driven by the
-    Auth service — but there is no Auth service in this stack, and first-access provisioning
-    exists precisely so a user is never blocked waiting for an event.
+    `GET /v1/wallets/me` provisions on first access, so this is all it takes.
 
-    This suite deliberately does *not* publish UserRegistered to Kafka to set up. It tried,
-    and `kafka-console-producer.sh` hangs under `docker exec` — five minutes of runtime for
-    something a 40ms HTTP call does. The consumer itself is covered by the wallet service's
-    own tests; what this suite is for is the flows that cross services.
+    There **is** an auth service now, and `test_00_identity.py` proves the event path works: a
+    registration provisions a wallet with no HTTP call at all. This helper stays because most tests
+    here want a funded user in one line, not a registration, an approval and a login — the flow
+    they are testing starts after all that.
+
+    It also stays because it is the honest thing for the suite to depend on: first-access
+    provisioning exists precisely so nobody is blocked waiting for an event, and a test that
+    relied on the event's timing would be testing Kafka's latency rather than the platform.
     """
     response = call("GET", f"{WALLET}/v1/wallets/me", user=user_id)
     assert response.status == 200, f"could not provision a wallet for {user_id}: {response}"

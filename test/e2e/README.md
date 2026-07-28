@@ -1,6 +1,6 @@
 # End-to-end tests
 
-104 checks against the **running** platform. Five services, real Kafka, real Postgres, real
+123 checks against the **running** platform. Five services, real Kafka, real Postgres, real
 files on disk.
 
 **Run manually. Deliberately not in CI** — see [Why not in CI](#why-not-in-ci).
@@ -39,6 +39,7 @@ A unit test cannot find any of those. That is what this suite is for.
 
 | File | |
 |---|---|
+| `test_00_identity.py` | Requirement 1.1 — registration, approval, roles, and whether the platform accepts the tokens Auth issues |
 | `test_01_publishing.py` | Requirement 1.3 — register, submit, review, appeal, price, publish |
 | `test_02_purchase.py` | Requirement 1.4 and §6.1 — the saga, the 70/30 split, idempotency |
 | `test_03_refund.py` | §6.2 — the twelve-hour window, the reversals, re-purchase |
@@ -52,6 +53,22 @@ A unit test cannot find any of those. That is what this suite is for.
 
 The numbering is load-bearing: pytest runs files in name order, and the suite tells one story
 — a game is published, then bought, then refunded, then gifted.
+
+### `test_00_identity.py` is the one that found the most
+
+Every other file here signs its own tokens — right for them, they are testing the platform and not
+the issuer, but it means nothing else would notice if the real issuer stopped producing acceptable
+ones. It was not producing acceptable ones at all: the auth service's tokens were rejected by all
+five services, because they carried no `iss` and no `aud`.
+
+It also found the reverse. That service spelled the type claim `type` while every verifier here
+reads `typ`, so the claim arrived empty — and an absent one was being treated as "access". Its
+seven-day refresh tokens, carrying a full role, worked on every endpoint on the platform. Both
+halves are now covered: the claims it issues, and a token that declares no type at all.
+
+The last check in the file is the whole platform in one assertion: a game published, bought with a
+token Auth issued, appearing in the buyer's profile — which means the catalog's `OwnershipGranted`
+crossed Kafka into a read-model in a different service.
 
 ### Three of these prove things no unit test can
 

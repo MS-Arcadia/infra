@@ -248,6 +248,48 @@ services:
         limits:
           memory: 128M
 
+  auth-profile-service:
+    # Auth and Profile in one deployment, as the requirements put them — two bounded contexts that
+    # talk only through events, so they can be split later without touching either one's callers.
+    #
+    # First in the service list because everything else depends on it for identity: this is what
+    # issues the tokens the other five verify. Nothing declares a `depends_on` for it, though —
+    # token verification is offline, so a service can start and serve while auth is down.
+    image: arcadia/auth-profile-service:${AUTH_VERSION:-local}
+    container_name: arcadia-auth
+    restart: unless-stopped
+    ports:
+      - "${AUTH_HTTP_PORT:-8085}:8085"
+    environment:
+      ENV: local
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+asyncpg://auth_user:auth_pass@postgres:5432/arcadia_auth
+      REDIS_URL: redis://redis:6379/1
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # The three that make its tokens acceptable to the rest of the platform. Without the issuer
+      # and audience every other service answers 401 — which is what happened before they were set.
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-arcadia-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-arcadia}
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-admin@arcadia.local}
+      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD}
+      # Deliberately relaxed here, and only here. 5 registrations a minute is a sensible public
+      # default and it makes the end-to-end suite impossible — it creates a handful of accounts per
+      # run by design, and the limiter is per-IP, so every test comes from the same one. Surfacing
+      # it as a variable is better than the suite quietly needing the limit to be off.
+      RATE_LIMIT_REGISTER: ${AUTH_RATE_LIMIT_REGISTER:-200/minute}
+      RATE_LIMIT_LOGIN: ${AUTH_RATE_LIMIT_LOGIN:-200/minute}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    deploy:
+      resources:
+        limits:
+          # Higher than the other Python services: this one also loads passlib/bcrypt and the
+          # OpenTelemetry SDK, and runs five Kafka consumers rather than one.
+          memory: 256M
+
   catalog-service:
     # Built by `cd catalog-service && make docker`. Nothing is compiled here.
     image: arcadia/catalog-service:${CATALOG_VERSION:-local}

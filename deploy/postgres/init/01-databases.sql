@@ -13,7 +13,7 @@
 -- is a change to one connection string, and no application query joins across databases,
 -- so nothing prevents it.
 --
--- Only the five services that exist get a database. Adding one later is four lines here
+-- Only the services that exist get a database. Adding one later is four lines here
 -- plus recreating the volume (`make nuke`), because this script runs once, on first boot
 -- of an empty data directory.
 
@@ -34,6 +34,13 @@ CREATE DATABASE arcadia_order OWNER order_user;
 CREATE ROLE media_user WITH LOGIN PASSWORD 'media_pass';
 CREATE DATABASE arcadia_media OWNER media_user;
 
+-- Auth and Profile share a deployment and therefore a database. They are separate bounded
+-- contexts and talk to each other only through events, so they could be split later — but giving
+-- two contexts in one process two databases would mean two connection pools and a distributed
+-- transaction between them for no boundary anyone is enforcing.
+CREATE ROLE auth_user WITH LOGIN PASSWORD 'auth_pass';
+CREATE DATABASE arcadia_auth OWNER auth_user;
+
 -- By default PostgreSQL lets every role connect to every database. Revoking that is
 -- what turns "a database per service" from a naming convention into a boundary.
 REVOKE ALL ON DATABASE arcadia_wallet  FROM PUBLIC;
@@ -41,11 +48,13 @@ REVOKE ALL ON DATABASE arcadia_payment FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_catalog FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_order   FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_media   FROM PUBLIC;
+REVOKE ALL ON DATABASE arcadia_auth    FROM PUBLIC;
 GRANT  ALL ON DATABASE arcadia_wallet  TO wallet_user;
 GRANT  ALL ON DATABASE arcadia_payment TO payment_user;
 GRANT  ALL ON DATABASE arcadia_catalog TO catalog_user;
 GRANT  ALL ON DATABASE arcadia_order   TO order_user;
 GRANT  ALL ON DATABASE arcadia_media   TO media_user;
+GRANT  ALL ON DATABASE arcadia_auth    TO auth_user;
 
 \connect arcadia_wallet
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
@@ -66,3 +75,7 @@ GRANT  ALL ON SCHEMA public TO order_user;
 \connect arcadia_media
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT  ALL ON SCHEMA public TO media_user;
+
+\connect arcadia_auth
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT  ALL ON SCHEMA public TO auth_user;

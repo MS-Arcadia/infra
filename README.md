@@ -37,6 +37,7 @@ platform is actually up rather than merely started.
 | Catalog | http://localhost:8082 · [docs](http://localhost:8082/docs) | Python |
 | Order | http://localhost:8083 · [docs](http://localhost:8083/docs) | Python |
 | Media | http://localhost:8084 · [docs](http://localhost:8084/docs) | Python |
+| Auth & Profile | http://localhost:8085 · [docs](http://localhost:8085/docs) | Python |
 
 ```bash
 curl -s localhost:8080/readyz
@@ -61,7 +62,7 @@ To exercise the API, import [`wallet-service/api/postman`](../wallet-service/api
 
 ## What runs, and what it costs
 
-Nine containers by default, roughly 2.5 GB with the limits set in the compose file:
+Ten containers by default, roughly 2.8 GB with the limits set in the compose file:
 
 | | Memory limit | |
 |---|---|---|
@@ -69,6 +70,7 @@ Nine containers by default, roughly 2.5 GB with the limits set in the compose fi
 | `kafka` | 640M | KRaft mode, no ZooKeeper, one partition per topic |
 | `redis` | 96M | gift-card rate-limit windows only, no persistence |
 | `minio` | 512M | the object store; pinned to a release that still has an admin console |
+| `auth-profile-service` | 256M | Python; Auth and Profile in one deployment, five Kafka consumers |
 | `wallet-service` | 128M | Go |
 | `payment-service` | 128M | Go |
 | `catalog-service` | 160M | Python; one uvicorn worker |
