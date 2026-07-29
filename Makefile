@@ -12,7 +12,7 @@ COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/d
 
 # How many containers `make wait` expects to go healthy. Named so the two places that count
 # them cannot disagree.
-SERVICE_COUNT := 7
+SERVICE_COUNT := 8
 
 # MinIO, for the migration target. The root credentials come from .env like everything else.
 MC_IMAGE := minio/mc:RELEASE.2025-04-16T18-13-26Z
@@ -55,8 +55,9 @@ images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../order-service docker
 	$(MAKE) -C ../media-service docker
 	$(MAKE) -C ../notification-service docker
+	$(MAKE) -C ../arcadia-frontend docker
 
-up: env ## Start Postgres, Redis, Kafka, MinIO and all seven services
+up: env ## Start Postgres, Redis, Kafka, MinIO, the seven services and the storefront
 	$(COMPOSE) up -d
 	@echo
 	@echo "  auth     REST http://localhost:8085   docs /docs"
@@ -66,6 +67,7 @@ up: env ## Start Postgres, Redis, Kafka, MinIO and all seven services
 	@echo "  order    REST http://localhost:8083   docs /docs"
 	@echo "  media    REST http://localhost:8084   docs /docs"
 	@echo "  notify   REST http://localhost:8086   docs /docs"
+	@echo "  store    WEB  http://localhost:3000"
 	@echo
 	@echo "  minio    S3   http://localhost:9000   console http://localhost:9001"
 	@echo "           log in with MINIO_ROOT_USER / MINIO_ROOT_PASSWORD from .env"
@@ -85,13 +87,16 @@ restart: ## Restart the services, after rebuilding an image
 	@# the old auth image running.
 	$(COMPOSE) up -d --force-recreate \
 		auth-profile-service wallet-service payment-service catalog-service \
-		order-service media-service notification-service
+		order-service media-service notification-service frontend
 
 wait: ## Block until every service reports ready
 	@echo "waiting for all $(SERVICE_COUNT) services to become healthy..."
+	@# The pattern has to name the storefront explicitly: its compose service is
+	@# `frontend`, not `frontend-service`, so a bare /-service$$/ match counted seven
+	@# of eight for ever and this target always timed out.
 	@for i in $$(seq 1 90); do \
 		up=$$($(COMPOSE) ps --format '{{.Service}} {{.Health}}' \
-			| awk '$$1 ~ /-service$$/ && $$2 == "healthy"' | wc -l | tr -d ' '); \
+			| awk '($$1 ~ /-service$$/ || $$1 == "frontend") && $$2 == "healthy"' | wc -l | tr -d ' '); \
 		[ "$$up" = "$(SERVICE_COUNT)" ] && { echo "all $(SERVICE_COUNT) healthy"; exit 0; }; \
 		sleep 2; \
 	done; \

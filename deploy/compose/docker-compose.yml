@@ -436,6 +436,33 @@ services:
           # fetch buffer and its own group membership.
           memory: 208M
 
+  frontend:
+    # Built by `cd arcadia-frontend && make docker`. The image bakes its API mode:
+    # `NEXT_PUBLIC_*` is inlined into the client bundle at build time, so this
+    # cannot be repointed by changing an environment variable on a running
+    # container — the build argument is where that decision lives.
+    #
+    # `mock` by default, which means the storefront is fully demonstrable with only
+    # this one container running. Rebuild with FRONTEND_API_MODE=live once the
+    # gateway exists.
+    image: arcadia/frontend:${FRONTEND_VERSION:-local}
+    container_name: arcadia-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    # No `depends_on`. Against the mock it needs nothing, and against a gateway it
+    # should still start and render rather than wait — a storefront that will not
+    # boot because a backend is down is worse than one that shows an error.
+    deploy:
+      resources:
+        limits:
+          # A Node server rendering React. Higher than the Go services and lower
+          # than the JVM-free Python ones need for their Kafka consumers.
+          memory: 320M
+
   # --- Metrics (profile: metrics) -----------------------------------------
   #
   # Prometheus scrapes each service's /metrics directly. There is no OTel collector,
