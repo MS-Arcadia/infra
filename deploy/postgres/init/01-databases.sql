@@ -47,6 +47,9 @@ CREATE DATABASE arcadia_auth OWNER auth_user;
 CREATE ROLE notification_user WITH LOGIN PASSWORD 'notification_pass';
 CREATE DATABASE arcadia_notification OWNER notification_user;
 
+CREATE ROLE marketplace_user WITH LOGIN PASSWORD 'marketplace_pass';
+CREATE DATABASE arcadia_marketplace OWNER marketplace_user;
+
 -- By default PostgreSQL lets every role connect to every database. Revoking that is
 -- what turns "a database per service" from a naming convention into a boundary.
 REVOKE ALL ON DATABASE arcadia_wallet  FROM PUBLIC;
@@ -56,6 +59,7 @@ REVOKE ALL ON DATABASE arcadia_order   FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_media   FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_auth    FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_notification FROM PUBLIC;
+REVOKE ALL ON DATABASE arcadia_marketplace  FROM PUBLIC;
 GRANT  ALL ON DATABASE arcadia_wallet  TO wallet_user;
 GRANT  ALL ON DATABASE arcadia_payment TO payment_user;
 GRANT  ALL ON DATABASE arcadia_catalog TO catalog_user;
@@ -63,6 +67,7 @@ GRANT  ALL ON DATABASE arcadia_order   TO order_user;
 GRANT  ALL ON DATABASE arcadia_media   TO media_user;
 GRANT  ALL ON DATABASE arcadia_auth    TO auth_user;
 GRANT  ALL ON DATABASE arcadia_notification TO notification_user;
+GRANT  ALL ON DATABASE arcadia_marketplace  TO marketplace_user;
 
 \connect arcadia_wallet
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
@@ -91,3 +96,7 @@ GRANT  ALL ON SCHEMA public TO auth_user;
 \connect arcadia_notification
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT  ALL ON SCHEMA public TO notification_user;
+
+\connect arcadia_marketplace
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT  ALL ON SCHEMA public TO marketplace_user;

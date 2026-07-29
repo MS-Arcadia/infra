@@ -17,7 +17,8 @@ COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/d
 # 7 of 8. `api-gateway` would not have matched either. So the list is the list: both
 # `up` and `wait` read it, and the count is derived rather than typed.
 APPS := auth-profile-service wallet-service payment-service catalog-service \
-        order-service media-service notification-service api-gateway frontend
+        order-service media-service notification-service marketplace-service \
+        api-gateway frontend
 
 SERVICE_COUNT := $(words $(APPS))
 
@@ -62,6 +63,7 @@ images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../order-service docker
 	$(MAKE) -C ../media-service docker
 	$(MAKE) -C ../notification-service docker
+	$(MAKE) -C ../marketplace-service docker
 	$(MAKE) -C ../api-gateway docker
 	$(MAKE) -C ../arcadia-frontend docker
 
@@ -75,6 +77,7 @@ up: env ## Start Postgres, Redis, Kafka, MinIO, the seven services, the gateway 
 	@echo "  order    REST http://localhost:8083   docs /docs"
 	@echo "  media    REST http://localhost:8084   docs /docs"
 	@echo "  notify   REST http://localhost:8086   docs /docs"
+	@echo "  market   REST http://localhost:8087   book /v1/items/{id}/book"
 	@echo
 	@echo "  gateway  REST http://localhost:8090   routes /"
 	@echo "           the one address a browser needs; the seven above are internal"

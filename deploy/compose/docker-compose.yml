@@ -436,6 +436,49 @@ services:
           # fetch buffer and its own group membership.
           memory: 208M
 
+  marketplace-service:
+    # Requirement 1.6. The item market: developers define items, staff distribute them
+    # at random, and users trade them through an order book matched every five minutes.
+    #
+    # The money never moves here. A match publishes SettleTradeCommand on trade-events
+    # and wallet-service performs the transfer — which is why wallet already had a
+    # handler for it before this service existed.
+    image: arcadia/marketplace-service:${MARKETPLACE_VERSION:-local}
+    container_name: arcadia-marketplace
+    restart: unless-stopped
+    ports:
+      - "${MARKETPLACE_HTTP_PORT:-8087}:8087"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://marketplace_user:marketplace_pass@postgres:5432/arcadia_marketplace?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      # The topic wallet-service, notification-service and auth-profile-service already
+      # subscribe to. Three consumers were waiting for these events before there was a
+      # producer, so changing this disconnects all three at once.
+      TOPIC_TRADE_EVENTS: trade-events
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-arcadia-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-arcadia}
+      # Read-only, for a buyer's spendable balance before a match. With SERVICE_TOKEN
+      # empty the service signs its own short-lived SERVICE token from JWT_SECRET, the
+      # same arrangement the wallet uses to call payment.
+      WALLET_SERVICE_URL: http://wallet-service:8080
+      SERVICE_TOKEN: ${MARKETPLACE_SERVICE_TOKEN:-}
+      MARKETPLACE_CURRENCY: ${WALLET_CURRENCY:-IRR}
+      # Requirement 1.6 says five minutes. Shortened locally so a reviewer sees the
+      # matching engine actually run rather than waiting for it — POST
+      # /v1/admin/matching/run triggers a pass immediately either way.
+      MATCH_INTERVAL: ${MARKETPLACE_MATCH_INTERVAL:-1m}
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    deploy:
+      resources:
+        limits:
+          # A Go service with one database and one periodic job.
+          memory: 128M
+
   api-gateway:
     # Requirement 1.1. The platform's single public entry point: one origin in front of
     # seven services, so the browser needs one CORS allow-list and one address instead
@@ -461,6 +504,7 @@ services:
       ORDER_SERVICE_URL: http://order-service:8083
       MEDIA_SERVICE_URL: http://media-service:8084
       NOTIFICATION_SERVICE_URL: http://notification-service:8086
+      MARKETPLACE_SERVICE_URL: http://marketplace-service:8087
       # The frontend's origin. An allow-list rather than `*`: `*` plus a bearer token
       # means any page on the internet can call this API with a token it has phished,
       # and the browser will allow it.

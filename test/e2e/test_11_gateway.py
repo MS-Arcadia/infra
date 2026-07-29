@@ -36,6 +36,7 @@ ROUTES = {
     "/payment": "payment-service",
     "/media": "media-service",
     "/notifications": "notification-service",
+    "/marketplace": "marketplace-service",
 }
 
 

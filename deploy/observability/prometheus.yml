@@ -45,3 +45,7 @@ scrape_configs:
   - job_name: notification-service
     static_configs:
       - targets: ['notification-service:8086']
+
+  - job_name: marketplace-service
+    static_configs:
+      - targets: ['marketplace-service:8087']
