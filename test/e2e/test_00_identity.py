@@ -22,7 +22,7 @@ import arcadia as a
 import jwt
 import pytest
 
-AUTH = "http://localhost:8085"
+AUTH = a.AUTH
 PASSWORD = "SuperSecret123!"
 
 
@@ -208,11 +208,13 @@ def test_the_access_token_carries_what_every_service_verifies(basic):
         ("catalog", f"{a.CATALOG}/v1/library"),
         ("order", f"{a.ORDER}/v1/orders"),
         ("media", f"{a.MEDIA}/v1/media/usage"),
+        ("notification", f"{a.NOTIFICATION}/v1/notifications"),
     ],
 )
 def test_every_service_accepts_a_token_the_auth_service_issued(service: str, url: str, basic):
-    """Five services, five 401s before this was fixed. Parameterised so the failure names which
-    one, because they do not all verify identically."""
+    """Five services, five 401s before this was fixed — notification-service was written after and
+    inherited the corrected verifier. Parameterised so the failure names which one, because they do
+    not all verify identically."""
     _, token = basic
     response = a.call("GET", url, bearer=token)
     assert response.status == 200, f"{service} rejected a real access token: {response}"
@@ -224,6 +226,7 @@ def test_every_service_accepts_a_token_the_auth_service_issued(service: str, url
         ("wallet", f"{a.WALLET}/v1/wallets/me"),
         ("catalog", f"{a.CATALOG}/v1/library"),
         ("order", f"{a.ORDER}/v1/orders"),
+        ("notification", f"{a.NOTIFICATION}/v1/notifications"),
     ],
 )
 def test_no_service_accepts_a_refresh_token(service: str, url: str, refresh_token: str):

@@ -41,6 +41,12 @@ CREATE DATABASE arcadia_media OWNER media_user;
 CREATE ROLE auth_user WITH LOGIN PASSWORD 'auth_pass';
 CREATE DATABASE arcadia_auth OWNER auth_user;
 
+-- Notification holds one table of rows people read. It produces no events and owns no topics, so
+-- it has no outbox — but it still gets its own database: what it stores is who was told what, and
+-- that is exactly the kind of thing another service should not be able to read.
+CREATE ROLE notification_user WITH LOGIN PASSWORD 'notification_pass';
+CREATE DATABASE arcadia_notification OWNER notification_user;
+
 -- By default PostgreSQL lets every role connect to every database. Revoking that is
 -- what turns "a database per service" from a naming convention into a boundary.
 REVOKE ALL ON DATABASE arcadia_wallet  FROM PUBLIC;
@@ -49,12 +55,14 @@ REVOKE ALL ON DATABASE arcadia_catalog FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_order   FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_media   FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_auth    FROM PUBLIC;
+REVOKE ALL ON DATABASE arcadia_notification FROM PUBLIC;
 GRANT  ALL ON DATABASE arcadia_wallet  TO wallet_user;
 GRANT  ALL ON DATABASE arcadia_payment TO payment_user;
 GRANT  ALL ON DATABASE arcadia_catalog TO catalog_user;
 GRANT  ALL ON DATABASE arcadia_order   TO order_user;
 GRANT  ALL ON DATABASE arcadia_media   TO media_user;
 GRANT  ALL ON DATABASE arcadia_auth    TO auth_user;
+GRANT  ALL ON DATABASE arcadia_notification TO notification_user;
 
 \connect arcadia_wallet
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
@@ -79,3 +87,7 @@ GRANT  ALL ON SCHEMA public TO media_user;
 \connect arcadia_auth
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT  ALL ON SCHEMA public TO auth_user;
+
+\connect arcadia_notification
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT  ALL ON SCHEMA public TO notification_user;

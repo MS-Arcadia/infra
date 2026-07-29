@@ -395,6 +395,47 @@ services:
           # escalates to multipart, and botocore's service model is a few MB resident.
           memory: 224M
 
+  notification-service:
+    # Requirement 1.10. The platform's first terminal consumer: it subscribes to five topics,
+    # produces nothing and owns no topic. Nothing depends on it, and nothing should — a service
+    # whose failure stops a purchase is not a notification service.
+    image: arcadia/notification-service:${NOTIFICATION_VERSION:-local}
+    container_name: arcadia-notification
+    restart: unless-stopped
+    ports:
+      - "${NOTIFICATION_HTTP_PORT:-8086}:8086"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://notification_user:notification_pass@postgres:5432/arcadia_notification
+      KAFKA_BROKERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      # Passed explicitly rather than left to the service's defaults. They happen to match, but a
+      # token this service accepts must be one every other service accepts, and that is worth
+      # stating in the deployment rather than relying on six codebases agreeing by coincidence.
+      JWT_ISSUER: ${JWT_ISSUER:-arcadia-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-arcadia}
+      # Two of the five belong to services that do not exist yet. Subscribed anyway: an empty
+      # topic costs nothing, a consumer group on one is silent, and notifications start the day
+      # Marketplace and Festival ship rather than the day somebody remembers to add them here.
+      # The service creates all five plus their .dlq companions at boot — auto-creation is off on
+      # the broker, and creation is idempotent, so both sides declaring a topic is the safe
+      # arrangement.
+      TOPIC_GAME_EVENTS: game-events
+      TOPIC_PURCHASE_EVENTS: purchase-events
+      TOPIC_USER_EVENTS: user-events
+      TOPIC_TRADE_EVENTS: trade-events
+      TOPIC_FESTIVAL_EVENTS: festival-events
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    deploy:
+      resources:
+        limits:
+          # Up from catalog's 160M: five aiokafka consumers rather than one, each with its own
+          # fetch buffer and its own group membership.
+          memory: 208M
+
   # --- Metrics (profile: metrics) -----------------------------------------
   #
   # Prometheus scrapes each service's /metrics directly. There is no OTel collector,

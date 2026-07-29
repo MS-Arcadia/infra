@@ -25,18 +25,30 @@ DEAD_LETTER_TOPICS = [
     "payment-events.dlq",
     "user-events.dlq",
     "trade-events.dlq",
+    # The notification service dead-letters to one of these for every topic it reads, and it is
+    # the only consumer of some of them. A notification that silently never arrives shows up here
+    # and nowhere else, because nothing downstream is waiting on it to notice.
+    "purchase-events.dlq",
+    "festival-events.dlq",
 ]
 
 # The Go and Python services have independently designed outbox tables — the Go one tracks
-# `status` and `attempt_count`, the Python one a nullable `published_at` and `attempts`. They
-# are separate services with separate schemas, so the queries differ rather than the schemas
-# being forced together.
+# `status` and `attempt_count`, the Python one a nullable `published_at` and `attempts`, and auth
+# a `dispatched` boolean in a table called `outbox`. They are separate services with separate
+# schemas, so the queries differ rather than the schemas being forced together.
+#
+# (database, table, unpublished, exhausted). `exhausted` is None where the schema does not count
+# attempts, which is not a gap worth inventing a column for: an undispatched row shows up in the
+# first check either way.
+#
+# notification-service is deliberately absent — it produces no events, so it has no outbox.
 OUTBOXES = {
-    "wallet": ("status <> 'PUBLISHED'", "attempt_count >= 10"),
-    "payment": ("status <> 'PUBLISHED'", "attempt_count >= 10"),
-    "catalog": ("published_at IS NULL", "attempts >= 10"),
-    "order": ("published_at IS NULL", "attempts >= 10"),
-    "media": ("published_at IS NULL", "attempts >= 10"),
+    "wallet": ("outbox_messages", "status <> 'PUBLISHED'", "attempt_count >= 10"),
+    "payment": ("outbox_messages", "status <> 'PUBLISHED'", "attempt_count >= 10"),
+    "catalog": ("outbox_messages", "published_at IS NULL", "attempts >= 10"),
+    "order": ("outbox_messages", "published_at IS NULL", "attempts >= 10"),
+    "media": ("outbox_messages", "published_at IS NULL", "attempts >= 10"),
+    "auth": ("outbox", "dispatched = false", None),
 }
 
 
@@ -63,13 +75,11 @@ def test_every_outbox_drained(database: str):
     Retried briefly before failing: the dispatcher polls on an interval, so a row written a
     moment ago still being unpublished is normal rather than broken.
     """
-    pending_clause, _ = OUTBOXES[database]
+    table, pending_clause, _ = OUTBOXES[database]
     deadline = time.monotonic() + 15
     unpublished = None
     while time.monotonic() < deadline:
-        unpublished = int(
-            a.psql(database, f"SELECT count(*) FROM outbox_messages WHERE {pending_clause}")
-        )
+        unpublished = int(a.psql(database, f"SELECT count(*) FROM {table} WHERE {pending_clause}"))
         if unpublished == 0:
             return
         time.sleep(1)
@@ -79,8 +89,10 @@ def test_every_outbox_drained(database: str):
 @pytest.mark.parametrize("database", sorted(OUTBOXES))
 def test_no_outbox_message_exhausted_its_retries(database: str):
     """A row past its attempt limit has stopped being retried and is waiting for a human."""
-    _, exhausted_clause = OUTBOXES[database]
-    stuck = int(a.psql(database, f"SELECT count(*) FROM outbox_messages WHERE {exhausted_clause}"))
+    table, _, exhausted_clause = OUTBOXES[database]
+    if exhausted_clause is None:
+        pytest.skip(f"arcadia_{database}.{table} does not count attempts")
+    stuck = int(a.psql(database, f"SELECT count(*) FROM {table} WHERE {exhausted_clause}"))
     assert stuck == 0, f"{stuck} permanently failed outbox rows in arcadia_{database}"
 
 

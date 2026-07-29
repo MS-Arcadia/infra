@@ -31,6 +31,8 @@ PAYMENT = "http://localhost:8081"
 CATALOG = "http://localhost:8082"
 ORDER = "http://localhost:8083"
 MEDIA = "http://localhost:8084"
+AUTH = "http://localhost:8085"
+NOTIFICATION = "http://localhost:8086"
 
 # The platform's own wallet, from PLATFORM_USER_ID.
 PLATFORM_USER = "00000000-0000-4000-8000-000000000001"

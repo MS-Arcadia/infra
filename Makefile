@@ -1,6 +1,6 @@
 # Arcadia platform tasks.
 #
-#   make images    build both service images (delegates to each service repo)
+#   make images    build every service image (delegates to each service repo)
 #   make up        start the platform
 #   make down      stop it, keeping data
 #   make nuke      stop it and delete the volumes
@@ -12,7 +12,7 @@ COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/d
 
 # How many containers `make wait` expects to go healthy. Named so the two places that count
 # them cannot disagree.
-SERVICE_COUNT := 6
+SERVICE_COUNT := 7
 
 # MinIO, for the migration target. The root credentials come from .env like everything else.
 MC_IMAGE := minio/mc:RELEASE.2025-04-16T18-13-26Z
@@ -54,8 +54,9 @@ images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../catalog-service docker
 	$(MAKE) -C ../order-service docker
 	$(MAKE) -C ../media-service docker
+	$(MAKE) -C ../notification-service docker
 
-up: env ## Start Postgres, Redis, Kafka, MinIO and all six services
+up: env ## Start Postgres, Redis, Kafka, MinIO and all seven services
 	$(COMPOSE) up -d
 	@echo
 	@echo "  auth     REST http://localhost:8085   docs /docs"
@@ -64,6 +65,7 @@ up: env ## Start Postgres, Redis, Kafka, MinIO and all six services
 	@echo "  catalog  REST http://localhost:8082   docs /docs"
 	@echo "  order    REST http://localhost:8083   docs /docs"
 	@echo "  media    REST http://localhost:8084   docs /docs"
+	@echo "  notify   REST http://localhost:8086   docs /docs"
 	@echo
 	@echo "  minio    S3   http://localhost:9000   console http://localhost:9001"
 	@echo "           log in with MINIO_ROOT_USER / MINIO_ROOT_PASSWORD from .env"
@@ -78,8 +80,12 @@ down: ## Stop everything, keeping data
 	$(COMPOSE) --profile metrics down
 
 restart: ## Restart the services, after rebuilding an image
+	@# Every service, so that rebuilding any one of them and running this actually restarts it.
+	@# auth-profile-service was missing from this list, which meant `make restart` quietly left
+	@# the old auth image running.
 	$(COMPOSE) up -d --force-recreate \
-		wallet-service payment-service catalog-service order-service media-service
+		auth-profile-service wallet-service payment-service catalog-service \
+		order-service media-service notification-service
 
 wait: ## Block until every service reports ready
 	@echo "waiting for all $(SERVICE_COUNT) services to become healthy..."

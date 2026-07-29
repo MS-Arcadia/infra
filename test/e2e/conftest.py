@@ -20,11 +20,13 @@ import pytest
 
 # Every service, and the endpoint that proves it is not merely listening.
 SERVICES = {
+    "auth-profile-service": a.AUTH,
     "wallet-service": a.WALLET,
     "payment-service": a.PAYMENT,
     "catalog-service": a.CATALOG,
     "order-service": a.ORDER,
     "media-service": a.MEDIA,
+    "notification-service": a.NOTIFICATION,
 }
 
 
