@@ -38,6 +38,7 @@ platform is actually up rather than merely started.
 | Order | http://localhost:8083 · [docs](http://localhost:8083/docs) | Python |
 | Media | http://localhost:8084 · [docs](http://localhost:8084/docs) | Python |
 | Auth & Profile | http://localhost:8085 · [docs](http://localhost:8085/docs) | Python |
+| Notification | http://localhost:8086 · [docs](http://localhost:8086/docs) | Python |
 
 ```bash
 curl -s localhost:8080/readyz
@@ -62,11 +63,11 @@ To exercise the API, import [`wallet-service/api/postman`](../wallet-service/api
 
 ## What runs, and what it costs
 
-Ten containers by default, roughly 2.8 GB with the limits set in the compose file:
+Eleven containers by default, roughly 3.0 GB with the limits set in the compose file:
 
 | | Memory limit | |
 |---|---|---|
-| `postgres` | 384M | one database and role per service, five of them |
+| `postgres` | 384M | one database and role per service, seven of them |
 | `kafka` | 640M | KRaft mode, no ZooKeeper, one partition per topic |
 | `redis` | 96M | gift-card rate-limit windows only, no persistence |
 | `minio` | 512M | the object store; pinned to a release that still has an admin console |
@@ -76,6 +77,7 @@ Ten containers by default, roughly 2.8 GB with the limits set in the compose fil
 | `catalog-service` | 160M | Python; one uvicorn worker |
 | `order-service` | 160M | Python; one uvicorn worker |
 | `media-service` | 224M | Python; uploads stream, so this does not scale with file size |
+| `notification-service` | 208M | Python; five Kafka consumers, one per topic it reads |
 
 The Python services get 160M rather than 128M because a CPython process with SQLAlchemy and
 aiokafka loaded starts higher than a Go binary does. One uvicorn worker each: a second worker
@@ -136,16 +138,23 @@ databases, so nothing prevents it.
 
 | Topic | Producer | Consumed by |
 |---|---|---|
-| `wallet-events` | wallet | **order (saga replies)**, Notification, Auth (abuse flags) |
+| `wallet-events` | wallet | **order (saga replies)**, Auth (abuse flags) |
 | `audit-events` | wallet | the audit sink |
 | `payment-events` | payment | wallet |
 | `wallet-commands` | **order** | wallet |
-| `game-events` | **catalog** | **order (ownership replies)**, Search, Festival, Profile |
+| `game-events` | **catalog** | **order (ownership replies)**, **notification**, Search, Festival, Profile |
 | `catalog-commands` | **order** | **catalog** |
-| `purchase-events` | **order** | Notification, Recommendation, Profile |
+| `purchase-events` | **order** | **notification**, Recommendation, Profile |
 | `media-events` | **media** | Search, Profile |
-| `trade-events` | Marketplace | wallet |
-| `user-events` | Auth | wallet, Profile, Notification |
+| `trade-events` | Marketplace | wallet, **notification** |
+| `festival-events` | Festival | **notification** |
+| `user-events` | **Auth** | wallet, **notification**, Profile |
+
+The notification service reads five of these and is the only consumer of two — `trade-events` and
+`festival-events` have no producer yet. It deliberately does **not** read `wallet-events`, which is
+where an earlier version of this table put it: that topic carries every balance change on the
+platform, and "your balance changed" is not news to somebody who just spent money. The things worth
+telling a person about money are the order events, which say what the money was for.
 
 The two **`-commands`** topics are different from the rest. They are addressed to exactly one
 service, so an unrecognised message on them is dead-lettered rather than ignored: it means the
