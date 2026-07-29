@@ -10,9 +10,16 @@
 
 COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/docker-compose.yml
 
-# How many containers `make wait` expects to go healthy. Named so the two places that count
-# them cannot disagree.
-SERVICE_COUNT := 8
+# Every application container, in one place.
+#
+# This used to be a count here and a pattern in `wait` — and the pattern matched
+# /-service$/, so `frontend` was never counted and the target timed out for ever at
+# 7 of 8. `api-gateway` would not have matched either. So the list is the list: both
+# `up` and `wait` read it, and the count is derived rather than typed.
+APPS := auth-profile-service wallet-service payment-service catalog-service \
+        order-service media-service notification-service api-gateway frontend
+
+SERVICE_COUNT := $(words $(APPS))
 
 # MinIO, for the migration target. The root credentials come from .env like everything else.
 MC_IMAGE := minio/mc:RELEASE.2025-04-16T18-13-26Z
@@ -55,9 +62,10 @@ images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../order-service docker
 	$(MAKE) -C ../media-service docker
 	$(MAKE) -C ../notification-service docker
+	$(MAKE) -C ../api-gateway docker
 	$(MAKE) -C ../arcadia-frontend docker
 
-up: env ## Start Postgres, Redis, Kafka, MinIO, the seven services and the storefront
+up: env ## Start Postgres, Redis, Kafka, MinIO, the seven services, the gateway and the storefront
 	$(COMPOSE) up -d
 	@echo
 	@echo "  auth     REST http://localhost:8085   docs /docs"
@@ -67,6 +75,9 @@ up: env ## Start Postgres, Redis, Kafka, MinIO, the seven services and the store
 	@echo "  order    REST http://localhost:8083   docs /docs"
 	@echo "  media    REST http://localhost:8084   docs /docs"
 	@echo "  notify   REST http://localhost:8086   docs /docs"
+	@echo
+	@echo "  gateway  REST http://localhost:8090   routes /"
+	@echo "           the one address a browser needs; the seven above are internal"
 	@echo "  store    WEB  http://localhost:3000"
 	@echo
 	@echo "  minio    S3   http://localhost:9000   console http://localhost:9001"
@@ -82,21 +93,21 @@ down: ## Stop everything, keeping data
 	$(COMPOSE) --profile metrics down
 
 restart: ## Restart the services, after rebuilding an image
-	@# Every service, so that rebuilding any one of them and running this actually restarts it.
-	@# auth-profile-service was missing from this list, which meant `make restart` quietly left
-	@# the old auth image running.
-	$(COMPOSE) up -d --force-recreate \
-		auth-profile-service wallet-service payment-service catalog-service \
-		order-service media-service notification-service frontend
+	@# $(APPS), so that rebuilding any one of them and running this actually restarts it.
+	@# auth-profile-service was missing from this list once, which meant `make restart`
+	@# quietly left the old auth image running.
+	$(COMPOSE) up -d --force-recreate $(APPS)
 
 wait: ## Block until every service reports ready
 	@echo "waiting for all $(SERVICE_COUNT) services to become healthy..."
-	@# The pattern has to name the storefront explicitly: its compose service is
-	@# `frontend`, not `frontend-service`, so a bare /-service$$/ match counted seven
-	@# of eight for ever and this target always timed out.
+	@# Matched against $(APPS) by name, not by a naming pattern. A pattern is how this
+	@# target came to count seven of eight for ever: `frontend` does not end in
+	@# `-service`, and neither does `api-gateway`.
 	@for i in $$(seq 1 90); do \
 		up=$$($(COMPOSE) ps --format '{{.Service}} {{.Health}}' \
-			| awk '($$1 ~ /-service$$/ || $$1 == "frontend") && $$2 == "healthy"' | wc -l | tr -d ' '); \
+			| awk -v apps="$(APPS)" \
+				'BEGIN { n = split(apps, a, " "); for (i = 1; i <= n; i++) want[a[i]] = 1 } \
+				 ($$1 in want) && $$2 == "healthy"' | wc -l | tr -d ' '); \
 		[ "$$up" = "$(SERVICE_COUNT)" ] && { echo "all $(SERVICE_COUNT) healthy"; exit 0; }; \
 		sleep 2; \
 	done; \

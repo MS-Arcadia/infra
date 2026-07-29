@@ -11,6 +11,13 @@ global:
 rule_files: [/etc/prometheus/alerts.yml]
 
 scrape_configs:
+  # The edge first: its request counters are labelled by prefix rather than by path,
+  # so this one job answers "which service is being called, how often, and how many
+  # of those calls failed" without a time series per game id.
+  - job_name: api-gateway
+    static_configs:
+      - targets: ['api-gateway:8090']
+
   - job_name: auth-profile-service
     static_configs:
       - targets: ['auth-profile-service:8085']

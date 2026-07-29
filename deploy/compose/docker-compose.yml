@@ -436,6 +436,57 @@ services:
           # fetch buffer and its own group membership.
           memory: 208M
 
+  api-gateway:
+    # Requirement 1.1. The platform's single public entry point: one origin in front of
+    # seven services, so the browser needs one CORS allow-list and one address instead
+    # of seven.
+    #
+    # Built by `cd api-gateway && make docker`.
+    image: arcadia/api-gateway:${GATEWAY_VERSION:-local}
+    container_name: arcadia-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8090}:8090"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # The prefix each service is reached under is fixed in the gateway's code, not
+      # here: a prefix is part of the platform's public contract and the frontend has
+      # it compiled in, so an environment variable must not be able to change it
+      # quietly. Only the internal addresses are configuration.
+      AUTH_SERVICE_URL: http://auth-profile-service:8085
+      WALLET_SERVICE_URL: http://wallet-service:8080
+      PAYMENT_SERVICE_URL: http://payment-service:8081
+      CATALOG_SERVICE_URL: http://catalog-service:8082
+      ORDER_SERVICE_URL: http://order-service:8083
+      MEDIA_SERVICE_URL: http://media-service:8084
+      NOTIFICATION_SERVICE_URL: http://notification-service:8086
+      # The frontend's origin. An allow-list rather than `*`: `*` plus a bearer token
+      # means any page on the internet can call this API with a token it has phished,
+      # and the browser will allow it.
+      CORS_ORIGINS: ${GATEWAY_CORS_ORIGINS:-http://localhost:3000}
+      RATE_LIMIT_PER_MINUTE: ${GATEWAY_RATE_LIMIT_PER_MINUTE:-600}
+      # Generous, because media streams large files through here. A 30-second cap on
+      # the whole platform would cut a real download.
+      UPSTREAM_TIMEOUT: ${GATEWAY_UPSTREAM_TIMEOUT:-30s}
+      # The gateway rejects a malformed token so a service never pays for one; it does
+      # not decide who may do what. Same secret, issuer and audience as everything
+      # else, stated explicitly for the same reason notification states them.
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-arcadia-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-arcadia}
+    # No `depends_on`. The gateway starts, reports itself live, and answers 503 naming
+    # whichever service is not up yet — which is more useful during a cold start than
+    # a container that refuses to boot. Its /readyz probes all seven, all
+    # non-critical: reporting the gateway unready because one of seven is down would
+    # take the whole platform offline over a single failure.
+    deploy:
+      resources:
+        limits:
+          # It holds no data and copies bytes between sockets. The only thing that
+          # grows is the rate limiter's map of client addresses, which is swept.
+          memory: 96M
+
   frontend:
     # Built by `cd arcadia-frontend && make docker`. The image bakes its API mode:
     # `NEXT_PUBLIC_*` is inlined into the client bundle at build time, so this
