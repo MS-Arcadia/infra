@@ -34,6 +34,11 @@ MEDIA = "http://localhost:8084"
 AUTH = "http://localhost:8085"
 NOTIFICATION = "http://localhost:8086"
 
+# The gateway. Every address above is what a service listens on directly; this is the one
+# a browser is meant to use. Both are kept, because the point of test_11_gateway.py is to
+# compare them.
+GATEWAY = "http://localhost:8090"
+
 # The platform's own wallet, from PLATFORM_USER_ID.
 PLATFORM_USER = "00000000-0000-4000-8000-000000000001"
 
