@@ -479,10 +479,111 @@ services:
           # A Go service with one database and one periodic job.
           memory: 128M
 
+  review-service:
+    # Requirement 1.7. Buyer reviews: post, like/dislike, edit/delete by the author,
+    # report for Support review. Ownership is verified synchronously against catalog
+    # before a review can be posted, the same anti-corruption pattern order-service
+    # uses to check a game's price and existing ownership.
+    image: arcadia/review-service:${REVIEW_VERSION:-local}
+    container_name: arcadia-review
+    restart: unless-stopped
+    ports:
+      - "${REVIEW_HTTP_PORT:-8088}:8088"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_PORT: 8088
+      DATABASE_URL: postgresql+asyncpg://review_user:review_pass@postgres:5432/arcadia_review
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-arcadia-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-arcadia}
+      CATALOG_SERVICE_URL: http://catalog-service:8082
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      catalog-service: { condition: service_started }
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+
+  festival-service:
+    # Requirement 1.9. Platform-wide festivals: Admin selects games, Support proposes a
+    # discount or a free run, the developer confirms it in Catalog, and this service
+    # applies the price change once approved and tells everyone the festival started.
+    image: arcadia/festival-service:${FESTIVAL_VERSION:-local}
+    container_name: arcadia-festival
+    restart: unless-stopped
+    ports:
+      - "${FESTIVAL_HTTP_PORT:-8089}:8089"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_PORT: 8089
+      DATABASE_URL: postgresql://festival_user:festival_pass@postgres:5432/arcadia_festival
+      KAFKA_BROKERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-arcadia-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-arcadia}
+      # Asked synchronously for every active user id when a festival starts, since
+      # requirement 1.9 makes FestivalStarted platform-wide. A slow or unreachable
+      # call degrades to an empty audience rather than blocking the festival.
+      AUTH_PROFILE_BASE_URL: http://auth-profile-service:8085
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      catalog-service: { condition: service_started }
+      auth-profile-service: { condition: service_started }
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+
+  community-service:
+    # Requirement 1.8. Per-game forums: posts with photo/video/file attachments (via
+    # media-service), comments, emoji reactions, report-and-remove. Feeds Profile's
+    # top-5-posts read-model and, once it exists, Search's index — both over
+    # community-events, the same "subscribe before the producer exists" pattern
+    # notification-service already uses for trade-events and festival-events.
+    image: arcadia/community-service:${COMMUNITY_VERSION:-local}
+    container_name: arcadia-community
+    restart: unless-stopped
+    ports:
+      - "${COMMUNITY_HTTP_PORT:-8091}:8091"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_PORT: 8091
+      PERSISTENCE_BACKEND: postgres
+      MESSAGING_BACKEND: kafka
+      IDENTITY_BACKEND: jwt
+      MEDIA_BACKEND: http
+      CATALOG_BACKEND: http
+      SEARCH_BACKEND: fake
+      CACHE_BACKEND: memory
+      DATABASE_URL: postgresql+asyncpg://community_user:community_pass@postgres:5432/arcadia_community
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-arcadia-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-arcadia}
+      AUTH_SERVICE_URL: http://auth-profile-service:8085
+      MEDIA_SERVICE_URL: http://media-service:8084
+      CATALOG_SERVICE_URL: http://catalog-service:8082
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      media-service: { condition: service_started }
+      catalog-service: { condition: service_started }
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+
   api-gateway:
     # Requirement 1.1. The platform's single public entry point: one origin in front of
-    # seven services, so the browser needs one CORS allow-list and one address instead
-    # of seven.
+    # ten services, so the browser needs one CORS allow-list and one address instead
+    # of ten.
     #
     # Built by `cd api-gateway && make docker`.
     image: arcadia/api-gateway:${GATEWAY_VERSION:-local}
@@ -505,6 +606,9 @@ services:
       MEDIA_SERVICE_URL: http://media-service:8084
       NOTIFICATION_SERVICE_URL: http://notification-service:8086
       MARKETPLACE_SERVICE_URL: http://marketplace-service:8087
+      REVIEW_SERVICE_URL: http://review-service:8088
+      FESTIVAL_SERVICE_URL: http://festival-service:8089
+      COMMUNITY_SERVICE_URL: http://community-service:8091
       # The frontend's origin. An allow-list rather than `*`: `*` plus a bearer token
       # means any page on the internet can call this API with a token it has phished,
       # and the browser will allow it.

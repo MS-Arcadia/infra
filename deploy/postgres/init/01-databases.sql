@@ -50,6 +50,15 @@ CREATE DATABASE arcadia_notification OWNER notification_user;
 CREATE ROLE marketplace_user WITH LOGIN PASSWORD 'marketplace_pass';
 CREATE DATABASE arcadia_marketplace OWNER marketplace_user;
 
+CREATE ROLE review_user WITH LOGIN PASSWORD 'review_pass';
+CREATE DATABASE arcadia_review OWNER review_user;
+
+CREATE ROLE festival_user WITH LOGIN PASSWORD 'festival_pass';
+CREATE DATABASE arcadia_festival OWNER festival_user;
+
+CREATE ROLE community_user WITH LOGIN PASSWORD 'community_pass';
+CREATE DATABASE arcadia_community OWNER community_user;
+
 -- By default PostgreSQL lets every role connect to every database. Revoking that is
 -- what turns "a database per service" from a naming convention into a boundary.
 REVOKE ALL ON DATABASE arcadia_wallet  FROM PUBLIC;
@@ -60,6 +69,9 @@ REVOKE ALL ON DATABASE arcadia_media   FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_auth    FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_notification FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_marketplace  FROM PUBLIC;
+REVOKE ALL ON DATABASE arcadia_review        FROM PUBLIC;
+REVOKE ALL ON DATABASE arcadia_festival      FROM PUBLIC;
+REVOKE ALL ON DATABASE arcadia_community     FROM PUBLIC;
 GRANT  ALL ON DATABASE arcadia_wallet  TO wallet_user;
 GRANT  ALL ON DATABASE arcadia_payment TO payment_user;
 GRANT  ALL ON DATABASE arcadia_catalog TO catalog_user;
@@ -68,6 +80,9 @@ GRANT  ALL ON DATABASE arcadia_media   TO media_user;
 GRANT  ALL ON DATABASE arcadia_auth    TO auth_user;
 GRANT  ALL ON DATABASE arcadia_notification TO notification_user;
 GRANT  ALL ON DATABASE arcadia_marketplace  TO marketplace_user;
+GRANT  ALL ON DATABASE arcadia_review        TO review_user;
+GRANT  ALL ON DATABASE arcadia_festival      TO festival_user;
+GRANT  ALL ON DATABASE arcadia_community     TO community_user;
 
 \connect arcadia_wallet
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
@@ -100,3 +115,15 @@ GRANT  ALL ON SCHEMA public TO notification_user;
 \connect arcadia_marketplace
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT  ALL ON SCHEMA public TO marketplace_user;
+
+\connect arcadia_review
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT  ALL ON SCHEMA public TO review_user;
+
+\connect arcadia_festival
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT  ALL ON SCHEMA public TO festival_user;
+
+\connect arcadia_community
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT  ALL ON SCHEMA public TO community_user;

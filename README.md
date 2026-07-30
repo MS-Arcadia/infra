@@ -39,6 +39,10 @@ platform is actually up rather than merely started.
 | Media | http://localhost:8084 · [docs](http://localhost:8084/docs) | Python |
 | Auth & Profile | http://localhost:8085 · [docs](http://localhost:8085/docs) | Python |
 | Notification | http://localhost:8086 · [docs](http://localhost:8086/docs) | Python |
+| Marketplace | http://localhost:8087 | Go |
+| Review | http://localhost:8088 · [docs](http://localhost:8088/docs) | Python |
+| Festival | http://localhost:8089 · [docs](http://localhost:8089/docs) | Python |
+| Community | http://localhost:8091 · [docs](http://localhost:8091/docs) | Python |
 
 ```bash
 curl -s localhost:8080/readyz
@@ -67,7 +71,7 @@ Eleven containers by default, roughly 3.0 GB with the limits set in the compose 
 
 | | Memory limit | |
 |---|---|---|
-| `postgres` | 384M | one database and role per service, seven of them |
+| `postgres` | 384M | one database and role per service, eleven of them |
 | `kafka` | 640M | KRaft mode, no ZooKeeper, one partition per topic |
 | `redis` | 96M | gift-card rate-limit windows only, no persistence |
 | `minio` | 512M | the object store; pinned to a release that still has an admin console |
@@ -78,6 +82,10 @@ Eleven containers by default, roughly 3.0 GB with the limits set in the compose 
 | `order-service` | 160M | Python; one uvicorn worker |
 | `media-service` | 224M | Python; uploads stream, so this does not scale with file size |
 | `notification-service` | 208M | Python; five Kafka consumers, one per topic it reads |
+| `marketplace-service` | 128M | Go; one database and one periodic matching job |
+| `review-service` | 160M | Python; one uvicorn worker |
+| `festival-service` | 160M | Python; one uvicorn worker |
+| `community-service` | 160M | Python; one uvicorn worker |
 
 The Python services get 160M rather than 128M because a CPython process with SQLAlchemy and
 aiokafka loaded starts higher than a Go binary does. One uvicorn worker each: a second worker
@@ -142,19 +150,24 @@ databases, so nothing prevents it.
 | `audit-events` | wallet | the audit sink |
 | `payment-events` | payment | wallet |
 | `wallet-commands` | **order** | wallet |
-| `game-events` | **catalog** | **order (ownership replies)**, **notification**, Search, Festival, Profile |
+| `game-events` | **catalog** | **order (ownership replies)**, **notification**, **review**, **community**, Search, Profile |
 | `catalog-commands` | **order** | **catalog** |
 | `purchase-events` | **order** | **notification**, Recommendation, Profile |
-| `media-events` | **media** | Search, Profile |
-| `trade-events` | Marketplace | wallet, **notification** |
-| `festival-events` | Festival | **notification** |
-| `user-events` | **Auth** | wallet, **notification**, Profile |
+| `media-events` | **media** | **community**, Search, Profile |
+| `trade-events` | **marketplace** | wallet, **notification** |
+| `festival-events` | **festival** | **notification** |
+| `review-events` | **review** | Search, Recommendation, Profile |
+| `community-events` | **community** | Profile (top posts), Search |
+| `user-events` | **Auth** | wallet, **notification**, **review**, **community**, Profile |
 
-The notification service reads five of these and is the only consumer of two — `trade-events` and
-`festival-events` have no producer yet. It deliberately does **not** read `wallet-events`, which is
-where an earlier version of this table put it: that topic carries every balance change on the
-platform, and "your balance changed" is not news to somebody who just spent money. The things worth
-telling a person about money are the order events, which say what the money was for.
+The notification service reads five of these (`game-events`, `purchase-events`, `user-events`,
+`trade-events`, `festival-events`) and is the only consumer of one — `festival-events`. It does not
+read `review-events` or `community-events`: a report on a review or a post is Support's business, and
+Support already sees it in the queue inside the service that owns it, not as a notification. It
+deliberately does **not** read `wallet-events` either, which is where an earlier version of this table
+put it: that topic carries every balance change on the platform, and "your balance changed" is not
+news to somebody who just spent money. The things worth telling a person about money are the order
+events, which say what the money was for.
 
 The two **`-commands`** topics are different from the rest. They are addressed to exactly one
 service, so an unrecognised message on them is dead-lettered rather than ignored: it means the

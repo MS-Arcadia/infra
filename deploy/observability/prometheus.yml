@@ -49,3 +49,15 @@ scrape_configs:
   - job_name: marketplace-service
     static_configs:
       - targets: ['marketplace-service:8087']
+
+  - job_name: review-service
+    static_configs:
+      - targets: ['review-service:8088']
+
+  - job_name: festival-service
+    static_configs:
+      - targets: ['festival-service:8089']
+
+  - job_name: community-service
+    static_configs:
+      - targets: ['community-service:8091']

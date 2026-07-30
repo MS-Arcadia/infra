@@ -18,6 +18,7 @@ COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/d
 # `up` and `wait` read it, and the count is derived rather than typed.
 APPS := auth-profile-service wallet-service payment-service catalog-service \
         order-service media-service notification-service marketplace-service \
+        review-service festival-service community-service \
         api-gateway frontend
 
 SERVICE_COUNT := $(words $(APPS))
@@ -64,10 +65,13 @@ images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../media-service docker
 	$(MAKE) -C ../notification-service docker
 	$(MAKE) -C ../marketplace-service docker
+	$(MAKE) -C ../review-service docker
+	$(MAKE) -C ../festival-service docker
+	$(MAKE) -C ../community-service docker
 	$(MAKE) -C ../api-gateway docker
 	$(MAKE) -C ../arcadia-frontend docker
 
-up: env ## Start Postgres, Redis, Kafka, MinIO, the seven services, the gateway and the storefront
+up: env ## Start Postgres, Redis, Kafka, MinIO, the ten services, the gateway and the storefront
 	$(COMPOSE) up -d
 	@echo
 	@echo "  auth     REST http://localhost:8085   docs /docs"
@@ -78,6 +82,9 @@ up: env ## Start Postgres, Redis, Kafka, MinIO, the seven services, the gateway 
 	@echo "  media    REST http://localhost:8084   docs /docs"
 	@echo "  notify   REST http://localhost:8086   docs /docs"
 	@echo "  market   REST http://localhost:8087   book /v1/items/{id}/book"
+	@echo "  review   REST http://localhost:8088   docs /docs"
+	@echo "  festival REST http://localhost:8089   docs /docs"
+	@echo "  community REST http://localhost:8091  docs /docs"
 	@echo
 	@echo "  gateway  REST http://localhost:8090   routes /"
 	@echo "           the one address a browser needs; the seven above are internal"
