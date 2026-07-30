@@ -636,14 +636,16 @@ services:
           memory: 96M
 
   frontend:
-    # Built by `cd arcadia-frontend && make docker`. The image bakes its API mode:
-    # `NEXT_PUBLIC_*` is inlined into the client bundle at build time, so this
-    # cannot be repointed by changing an environment variable on a running
-    # container — the build argument is where that decision lives.
+    # Built by `cd arcadia-frontend && make docker API_MODE=... API_URL=...`, which
+    # `infra`'s own `make images` now does with `API_MODE=live` against the gateway's
+    # published address. The image bakes its API mode: `NEXT_PUBLIC_*` is inlined into
+    # the client bundle at build time, so this cannot be repointed by changing an
+    # environment variable on a running container — the build argument is where that
+    # decision lives.
     #
-    # `mock` by default, which means the storefront is fully demonstrable with only
-    # this one container running. Rebuild with FRONTEND_API_MODE=live once the
-    # gateway exists.
+    # Rebuild with `make -C ../arcadia-frontend docker` (no args) to get the old
+    # `mock` image back — the storefront is still fully demonstrable with only this
+    # one container running, no backend required.
     image: arcadia/frontend:${FRONTEND_VERSION:-local}
     container_name: arcadia-frontend
     restart: unless-stopped

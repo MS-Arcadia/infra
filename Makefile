@@ -69,7 +69,11 @@ images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../festival-service docker
 	$(MAKE) -C ../community-service docker
 	$(MAKE) -C ../api-gateway docker
-	$(MAKE) -C ../arcadia-frontend docker
+	@# The frontend bakes NEXT_PUBLIC_* at build time, so "live" and the gateway's
+	@# published address are chosen here, not by a runtime environment variable on
+	@# the container. 8090 is GATEWAY_PORT's own default in deploy/compose/.env.example;
+	@# override with FRONTEND_API_URL if the gateway is published elsewhere.
+	$(MAKE) -C ../arcadia-frontend docker API_MODE=live API_URL=$(or $(FRONTEND_API_URL),http://localhost:8090)
 
 up: env ## Start Postgres, Redis, Kafka, MinIO, the ten services, the gateway and the storefront
 	$(COMPOSE) up -d
