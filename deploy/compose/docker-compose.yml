@@ -553,7 +553,10 @@ services:
       - "${COMMUNITY_HTTP_PORT:-8091}:8091"
     environment:
       ENVIRONMENT: local
-      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Case-sensitive uppercase-only, unlike every other service here (which
+      # accept the platform's normal lowercase default) — same reason
+      # auth-profile-service overrides it too.
+      LOG_LEVEL: ${LOG_LEVEL_UPPER:-INFO}
       HTTP_PORT: 8091
       PERSISTENCE_BACKEND: postgres
       MESSAGING_BACKEND: kafka

@@ -37,6 +37,9 @@ ROUTES = {
     "/media": "media-service",
     "/notifications": "notification-service",
     "/marketplace": "marketplace-service",
+    "/reviews": "review-service",
+    "/festivals": "festival-service",
+    "/community": "community-service",
 }
 
 
