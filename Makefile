@@ -18,7 +18,7 @@ COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/d
 # `up` and `wait` read it, and the count is derived rather than typed.
 APPS := auth-profile-service wallet-service payment-service catalog-service \
         order-service media-service notification-service marketplace-service \
-        review-service festival-service community-service \
+        review-service festival-service community-service search-service \
         api-gateway frontend
 
 SERVICE_COUNT := $(words $(APPS))
@@ -68,6 +68,7 @@ images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../review-service docker
 	$(MAKE) -C ../festival-service docker
 	$(MAKE) -C ../community-service docker
+	$(MAKE) -C ../search-service docker
 	$(MAKE) -C ../api-gateway docker
 	@# The frontend bakes NEXT_PUBLIC_* at build time, so "live" and the gateway's
 	@# published address are chosen here, not by a runtime environment variable on
@@ -75,7 +76,7 @@ images: ## Build every service image (each service builds its own)
 	@# override with FRONTEND_API_URL if the gateway is published elsewhere.
 	$(MAKE) -C ../arcadia-frontend docker API_MODE=live API_URL=$(or $(FRONTEND_API_URL),http://localhost:8090)
 
-up: env ## Start Postgres, Redis, Kafka, MinIO, the ten services, the gateway and the storefront
+up: env ## Start Postgres, Redis, Kafka, MinIO, the eleven services, the gateway and the storefront
 	$(COMPOSE) up -d
 	@echo
 	@echo "  auth     REST http://localhost:8085   docs /docs"
@@ -89,6 +90,7 @@ up: env ## Start Postgres, Redis, Kafka, MinIO, the ten services, the gateway an
 	@echo "  review   REST http://localhost:8088   docs /docs"
 	@echo "  festival REST http://localhost:8089   docs /docs"
 	@echo "  community REST http://localhost:8091  docs /docs"
+	@echo "  search   REST http://localhost:8092   docs /docs"
 	@echo
 	@echo "  gateway  REST http://localhost:8090   routes /"
 	@echo "           the one address a browser needs; the seven above are internal"

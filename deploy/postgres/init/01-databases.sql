@@ -59,6 +59,9 @@ CREATE DATABASE arcadia_festival OWNER festival_user;
 CREATE ROLE community_user WITH LOGIN PASSWORD 'community_pass';
 CREATE DATABASE arcadia_community OWNER community_user;
 
+CREATE ROLE search_user WITH LOGIN PASSWORD 'search_pass';
+CREATE DATABASE arcadia_search OWNER search_user;
+
 -- By default PostgreSQL lets every role connect to every database. Revoking that is
 -- what turns "a database per service" from a naming convention into a boundary.
 REVOKE ALL ON DATABASE arcadia_wallet  FROM PUBLIC;
@@ -72,6 +75,7 @@ REVOKE ALL ON DATABASE arcadia_marketplace  FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_review        FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_festival      FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_community     FROM PUBLIC;
+REVOKE ALL ON DATABASE arcadia_search        FROM PUBLIC;
 GRANT  ALL ON DATABASE arcadia_wallet  TO wallet_user;
 GRANT  ALL ON DATABASE arcadia_payment TO payment_user;
 GRANT  ALL ON DATABASE arcadia_catalog TO catalog_user;
@@ -83,6 +87,7 @@ GRANT  ALL ON DATABASE arcadia_marketplace  TO marketplace_user;
 GRANT  ALL ON DATABASE arcadia_review        TO review_user;
 GRANT  ALL ON DATABASE arcadia_festival      TO festival_user;
 GRANT  ALL ON DATABASE arcadia_community     TO community_user;
+GRANT  ALL ON DATABASE arcadia_search        TO search_user;
 
 \connect arcadia_wallet
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
@@ -127,3 +132,7 @@ GRANT  ALL ON SCHEMA public TO festival_user;
 \connect arcadia_community
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT  ALL ON SCHEMA public TO community_user;
+
+\connect arcadia_search
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT  ALL ON SCHEMA public TO search_user;

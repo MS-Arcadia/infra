@@ -543,9 +543,7 @@ services:
   community-service:
     # Requirement 1.8. Per-game forums: posts with photo/video/file attachments (via
     # media-service), comments, emoji reactions, report-and-remove. Feeds Profile's
-    # top-5-posts read-model and, once it exists, Search's index — both over
-    # community-events, the same "subscribe before the producer exists" pattern
-    # notification-service already uses for trade-events and festival-events.
+    # top-5-posts read-model and search-service's index, both over community-events.
     image: arcadia/community-service:${COMMUNITY_VERSION:-local}
     container_name: arcadia-community
     restart: unless-stopped
@@ -563,7 +561,7 @@ services:
       IDENTITY_BACKEND: jwt
       MEDIA_BACKEND: http
       CATALOG_BACKEND: http
-      SEARCH_BACKEND: fake
+      SEARCH_BACKEND: http
       CACHE_BACKEND: memory
       DATABASE_URL: postgresql+asyncpg://community_user:community_pass@postgres:5432/arcadia_community
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -573,11 +571,35 @@ services:
       AUTH_SERVICE_URL: http://auth-profile-service:8085
       MEDIA_SERVICE_URL: http://media-service:8084
       CATALOG_SERVICE_URL: http://catalog-service:8082
+      SEARCH_SERVICE_URL: http://search-service:8092
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
       media-service: { condition: service_started }
       catalog-service: { condition: service_started }
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+
+  search-service:
+    # Full-text search over community posts (architecture §7.3's CQRS read side).
+    # Postgres tsvector/GIN, not Elasticsearch — see the service's own README for
+    # why. Consumes community-events; answers community-service with post ids only.
+    image: arcadia/search-service:${SEARCH_VERSION:-local}
+    container_name: arcadia-search
+    restart: unless-stopped
+    ports:
+      - "${SEARCH_HTTP_PORT:-8092}:8092"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HTTP_PORT: 8092
+      DATABASE_URL: postgresql://search_user:search_pass@postgres:5432/arcadia_search
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
     deploy:
       resources:
         limits:
