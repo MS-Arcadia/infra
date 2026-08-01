@@ -304,9 +304,14 @@ services:
       KAFKA_BROKERS: kafka:9092
       JWT_SECRET: ${JWT_SECRET}
       CURRENCY: ${WALLET_CURRENCY:-IRR}
+      # Read-through cache for the public games list/detail endpoints (requirement
+      # 2.3's p95 target). Empty disables it; the service falls back to Postgres
+      # on every read rather than refusing to boot.
+      REDIS_URL: redis://redis:6379/2
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
     deploy:
       resources:
         limits:
@@ -530,9 +535,12 @@ services:
       # requirement 1.9 makes FestivalStarted platform-wide. A slow or unreachable
       # call degrades to an empty audience rather than blocking the festival.
       AUTH_PROFILE_BASE_URL: http://auth-profile-service:8085
+      # Read-through cache for the public festivals list/detail endpoints.
+      REDIS_URL: redis://redis:6379/4
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
       catalog-service: { condition: service_started }
       auth-profile-service: { condition: service_started }
     deploy:
@@ -562,7 +570,10 @@ services:
       MEDIA_BACKEND: http
       CATALOG_BACKEND: http
       SEARCH_BACKEND: http
-      CACHE_BACKEND: memory
+      # Also backs the explore/game feed read-through cache, not just the rate
+      # limiter and idempotency store this connection served before.
+      CACHE_BACKEND: redis
+      REDIS_URL: redis://redis:6379/5
       DATABASE_URL: postgresql+asyncpg://community_user:community_pass@postgres:5432/arcadia_community
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       JWT_SECRET: ${JWT_SECRET}
@@ -575,6 +586,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
       media-service: { condition: service_started }
       catalog-service: { condition: service_started }
     deploy:
@@ -597,9 +609,13 @@ services:
       HTTP_PORT: 8092
       DATABASE_URL: postgresql://search_user:search_pass@postgres:5432/arcadia_search
       KAFKA_BROKERS: kafka:9092
+      # Read-through cache for repeated search queries; the index itself churns
+      # fast, hence the short TTL set in the service's own config default.
+      REDIS_URL: redis://redis:6379/3
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
     deploy:
       resources:
         limits:
