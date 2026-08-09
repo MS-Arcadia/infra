@@ -30,6 +30,10 @@ DEAD_LETTER_TOPICS = [
     # and nowhere else, because nothing downstream is waiting on it to notice.
     "purchase-events.dlq",
     "festival-events.dlq",
+    # Community's own topic. Search and Profile both build read-models from it, and a post
+    # that never becomes findable is invisible everywhere else — the failure shows up here
+    # first. `game-events.dlq` above now also covers community's consumer of that topic.
+    "community-events.dlq",
 ]
 
 # The Go and Python services have independently designed outbox tables — the Go one tracks
@@ -49,6 +53,8 @@ OUTBOXES = {
     "order": ("outbox_messages", "published_at IS NULL", "attempts >= 10"),
     "media": ("outbox_messages", "published_at IS NULL", "attempts >= 10"),
     "auth": ("outbox", "dispatched = false", None),
+    # Community follows the Python shape but calls the table `outbox`, not `outbox_messages`.
+    "community": ("outbox", "published_at IS NULL", "attempts >= 10"),
 }
 
 
