@@ -19,7 +19,7 @@ COMPOSE := docker compose --project-directory deploy/compose -f deploy/compose/d
 APPS := auth-profile-service wallet-service payment-service catalog-service \
         order-service media-service notification-service marketplace-service \
         review-service festival-service community-service search-service \
-        api-gateway frontend
+        recommendation-service api-gateway frontend
 
 SERVICE_COUNT := $(words $(APPS))
 
@@ -69,6 +69,7 @@ images: ## Build every service image (each service builds its own)
 	$(MAKE) -C ../festival-service docker
 	$(MAKE) -C ../community-service docker
 	$(MAKE) -C ../search-service docker
+	$(MAKE) -C ../recommendation-service docker
 	$(MAKE) -C ../api-gateway docker
 	@# The frontend bakes NEXT_PUBLIC_* at build time, so "live" and the gateway's
 	@# published address are chosen here, not by a runtime environment variable on
@@ -91,6 +92,7 @@ up: env ## Start Postgres, Redis, Kafka, MinIO, the eleven services, the gateway
 	@echo "  festival REST http://localhost:8089   docs /docs"
 	@echo "  community REST http://localhost:8091  docs /docs"
 	@echo "  search   REST http://localhost:8092   docs /docs"
+	@echo "  reco     REST http://localhost:8093   docs /v1/docs"
 	@echo
 	@echo "  gateway  REST http://localhost:8090   routes /"
 	@echo "           the one address a browser needs; the seven above are internal"

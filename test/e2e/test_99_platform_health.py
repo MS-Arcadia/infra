@@ -55,6 +55,8 @@ OUTBOXES = {
     "auth": ("outbox", "dispatched = false", None),
     # Community follows the Python shape but calls the table `outbox`, not `outbox_messages`.
     "community": ("outbox", "published_at IS NULL", "attempts >= 10"),
+    # Recommendation shares community's shape: same table name, same columns.
+    "recommendation": ("outbox", "published_at IS NULL", "attempts >= 10"),
 }
 
 

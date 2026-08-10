@@ -621,6 +621,44 @@ services:
         limits:
           memory: 160M
 
+  recommendation-service:
+    # Requirements §3.1, the competitive differentiator. Hybrid game recommendations: content-based over
+    # Catalog's genres and tags, plus item-item collaborative filtering over who bought what. Purely
+    # event-driven — it consumes game-events, purchase-events and review-events and calls no sibling
+    # service, so it keeps serving when Catalog and Store are both down.
+    image: arcadia/recommendation-service:${RECOMMENDATION_VERSION:-local}
+    container_name: arcadia-recommendation
+    restart: unless-stopped
+    ports:
+      - "${RECOMMENDATION_HTTP_PORT:-8093}:8093"
+    environment:
+      APP_ENV: local
+      # Uppercase-only, like community-service and auth-profile-service.
+      LOG_LEVEL: ${LOG_LEVEL_UPPER:-INFO}
+      PERSISTENCE_BACKEND: postgres
+      MESSAGING_BACKEND: kafka
+      IDENTITY_BACKEND: jwt
+      CACHE_BACKEND: redis
+      REDIS_URL: redis://redis:6379/6
+      DATABASE_URL: postgresql+asyncpg://recommendation_user:recommendation_pass@postgres:5432/arcadia_recommendation
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-arcadia-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-arcadia}
+      # The batch sweep runs on the same five-minute cadence as the marketplace matching engine, so the
+      # machine is not running two unrelated schedules. POST /v1/admin/recommendations/refresh forces one,
+      # which is what the end-to-end suite uses rather than waiting five minutes.
+      GENERATION_ENABLED: "true"
+      GENERATION_INTERVAL_SECONDS: 300
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+
   api-gateway:
     # Requirement 1.1. The platform's single public entry point: one origin in front of
     # ten services, so the browser needs one CORS allow-list and one address instead

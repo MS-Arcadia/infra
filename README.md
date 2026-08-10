@@ -43,6 +43,8 @@ platform is actually up rather than merely started.
 | Review | http://localhost:8088 · [docs](http://localhost:8088/docs) | Python |
 | Festival | http://localhost:8089 · [docs](http://localhost:8089/docs) | Python |
 | Community | http://localhost:8091 · [docs](http://localhost:8091/docs) | Python |
+| Search | http://localhost:8092 · [docs](http://localhost:8092/docs) | Python |
+| Recommendation | http://localhost:8093 · [docs](http://localhost:8093/v1/docs) | Python |
 
 ```bash
 curl -s localhost:8080/readyz
@@ -150,15 +152,16 @@ databases, so nothing prevents it.
 | `audit-events` | wallet | the audit sink |
 | `payment-events` | payment | wallet |
 | `wallet-commands` | **order** | wallet |
-| `game-events` | **catalog** | **order (ownership replies)**, **notification**, **review**, **community**, Search, Profile |
+| `game-events` | **catalog** | **order (ownership replies)**, **notification**, **review**, **community**, **recommendation**, Search, Profile |
 | `catalog-commands` | **order** | **catalog** |
-| `purchase-events` | **order** | **notification**, Recommendation, Profile |
+| `purchase-events` | **order** | **notification**, **recommendation**, Profile |
 | `media-events` | **media** | **community**, Search, Profile |
 | `trade-events` | **marketplace** | wallet, **notification** |
 | `festival-events` | **festival** | **notification** |
-| `review-events` | **review** | Search, Recommendation, Profile |
+| `review-events` | **review** | **recommendation**, Search, Profile |
 | `community-events` | **community** | Profile (top posts), Search |
 | `user-events` | **Auth** | wallet, **notification**, **review**, **community**, Profile |
+| `reco-events` | **recommendation** | Profile |
 
 The notification service reads five of these (`game-events`, `purchase-events`, `user-events`,
 `trade-events`, `festival-events`) and is the only consumer of one — `festival-events`. It does not

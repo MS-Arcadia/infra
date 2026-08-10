@@ -27,6 +27,7 @@ SERVICES = {
     "order-service": a.ORDER,
     "media-service": a.MEDIA,
     "notification-service": a.NOTIFICATION,
+    "recommendation-service": a.RECOMMENDATION,
 }
 
 

@@ -62,6 +62,12 @@ CREATE DATABASE arcadia_community OWNER community_user;
 CREATE ROLE search_user WITH LOGIN PASSWORD 'search_pass';
 CREATE DATABASE arcadia_search OWNER search_user;
 
+-- Recommendation keeps a read-model of games and a preference vector per user, both derived entirely from
+-- events. Nothing in here is a source of truth, so losing this database costs a rebuild rather than data --
+-- but it is still its own, because what it stores is an inference about a person's taste.
+CREATE ROLE recommendation_user WITH LOGIN PASSWORD 'recommendation_pass';
+CREATE DATABASE arcadia_recommendation OWNER recommendation_user;
+
 -- By default PostgreSQL lets every role connect to every database. Revoking that is
 -- what turns "a database per service" from a naming convention into a boundary.
 REVOKE ALL ON DATABASE arcadia_wallet  FROM PUBLIC;
@@ -76,6 +82,7 @@ REVOKE ALL ON DATABASE arcadia_review        FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_festival      FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_community     FROM PUBLIC;
 REVOKE ALL ON DATABASE arcadia_search        FROM PUBLIC;
+REVOKE ALL ON DATABASE arcadia_recommendation FROM PUBLIC;
 GRANT  ALL ON DATABASE arcadia_wallet  TO wallet_user;
 GRANT  ALL ON DATABASE arcadia_payment TO payment_user;
 GRANT  ALL ON DATABASE arcadia_catalog TO catalog_user;
@@ -88,6 +95,7 @@ GRANT  ALL ON DATABASE arcadia_review        TO review_user;
 GRANT  ALL ON DATABASE arcadia_festival      TO festival_user;
 GRANT  ALL ON DATABASE arcadia_community     TO community_user;
 GRANT  ALL ON DATABASE arcadia_search        TO search_user;
+GRANT  ALL ON DATABASE arcadia_recommendation TO recommendation_user;
 
 \connect arcadia_wallet
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
@@ -136,3 +144,7 @@ GRANT  ALL ON SCHEMA public TO community_user;
 \connect arcadia_search
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT  ALL ON SCHEMA public TO search_user;
+
+\connect arcadia_recommendation
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT  ALL ON SCHEMA public TO recommendation_user;
