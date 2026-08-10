@@ -13,8 +13,10 @@ bottom of this file are the ones that would notice if that came back.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 from arcadia import GATEWAY, WALLET, call, new_id
@@ -25,6 +27,50 @@ MARKETPLACE = "http://localhost:8087"
 # fetch. Generous, because a flaky assertion about eventual consistency teaches
 # people to re-run the suite rather than read it.
 SETTLE_SECONDS = 8
+
+def _find_infra_dir() -> Path:
+    """Locate the `infra` directory `compose()` needs to run from.
+
+    Rather than assume this test file sits a fixed number of levels above `infra`
+    (a guess that breaks the moment the repo is laid out differently — as it did
+    here), walk upward from this file looking for the thing that actually matters:
+    a directory containing `deploy/compose/docker-compose.yml`. That works no
+    matter how deep this test file is nested.
+
+    `ARCADIA_INFRA_DIR` overrides the search entirely, for layouts (e.g. CI
+    checkouts) where it still can't find it.
+    """
+    override = os.environ.get("ARCADIA_INFRA_DIR")
+    if override:
+        return Path(override)
+
+    marker = Path("deploy") / "compose" / "docker-compose.yml"
+    here = Path(__file__).resolve().parent
+    for candidate in (here, *here.parents):
+        if (candidate / marker).exists():
+            return candidate
+        if (candidate / "infra" / marker).exists():
+            return candidate / "infra"
+
+    raise RuntimeError(
+        f"Could not find an infra directory (looked for {marker} in {here} and its "
+        "parents). Set the ARCADIA_INFRA_DIR environment variable to the directory "
+        "that contains deploy/compose/docker-compose.yml."
+    )
+
+
+# The `infra` directory (where docker-compose.yml lives), so the suite runs on any
+# checkout and any machine regardless of how deep this file is nested.
+INFRA_DIR = _find_infra_dir()
+
+
+def compose(*args: str) -> subprocess.CompletedProcess:
+    """Run `docker compose` against this repo's compose file, from INFRA_DIR."""
+    return subprocess.run(
+        ["docker", "compose", "--project-directory", "deploy/compose",
+         "-f", "deploy/compose/docker-compose.yml", *args],
+        cwd=INFRA_DIR, capture_output=True, text=True,
+    )
 
 
 def mkt(method: str, path: str, **kwargs):
@@ -60,13 +106,11 @@ def seed_participant(user: str) -> None:
     same — so the row is inserted the way the consumer would insert it. What is being
     tested is the market, not Auth's event.
     """
-    subprocess.run(
-        ["docker", "compose", "--project-directory", "deploy/compose",
-         "-f", "deploy/compose/docker-compose.yml", "exec", "-T", "postgres",
-         "psql", "-U", "arcadia", "-d", "arcadia_marketplace", "-c",
-         f"INSERT INTO participants (user_id) VALUES ('{user}') ON CONFLICT DO NOTHING;"],
-        cwd="/Users/moeein/Documents/Arcadia/infra", capture_output=True, check=True,
+    result = compose(
+        "exec", "-T", "postgres", "psql", "-U", "arcadia", "-d", "arcadia_marketplace",
+        "-c", f"INSERT INTO participants (user_id) VALUES ('{user}') ON CONFLICT DO NOTHING;",
     )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture
@@ -331,13 +375,11 @@ def test_a_granted_item_reaches_the_profile_service(item, admin):
                body={"user_ids": [user]}).status == 200
     time.sleep(SETTLE_SECONDS)
 
-    rows = subprocess.run(
-        ["docker", "compose", "--project-directory", "deploy/compose",
-         "-f", "deploy/compose/docker-compose.yml", "exec", "-T", "postgres",
-         "psql", "-U", "arcadia", "-d", "arcadia_auth", "-tAc",
-         f"SELECT count(*) FROM owned_items WHERE user_id = '{user}';"],
-        cwd="/Users/moeein/Documents/Arcadia/infra", capture_output=True, text=True, check=True,
+    rows = compose(
+        "exec", "-T", "postgres", "psql", "-U", "arcadia", "-d", "arcadia_auth",
+        "-tAc", f"SELECT count(*) FROM owned_items WHERE user_id = '{user}';",
     )
+    assert rows.returncode == 0, rows.stderr
     assert int(rows.stdout.strip()) >= 1, \
         "the profile's item list is still empty; ItemGranted did not reach the projector"
 
@@ -349,12 +391,9 @@ def test_no_marketplace_event_was_dead_lettered():
     platform has already had once, with GiftSent. It is invisible from the producer's
     side, which is why it is asserted from the topic.
     """
-    result = subprocess.run(
-        ["docker", "compose", "--project-directory", "deploy/compose",
-         "-f", "deploy/compose/docker-compose.yml", "exec", "-T", "kafka",
-         "kafka-get-offsets.sh", "--bootstrap-server", "localhost:9092",
-         "--topic", "trade-events.dlq"],
-        cwd="/Users/moeein/Documents/Arcadia/infra", capture_output=True, text=True,
+    result = compose(
+        "exec", "-T", "kafka", "kafka-get-offsets.sh",
+        "--bootstrap-server", "localhost:9092", "--topic", "trade-events.dlq",
     )
     depth = sum(int(line.rsplit(":", 1)[1]) for line in result.stdout.splitlines() if ":" in line)
     assert depth == 0, f"trade-events.dlq holds {depth} messages a consumer could not read"

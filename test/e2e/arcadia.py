@@ -33,6 +33,11 @@ ORDER = "http://localhost:8083"
 MEDIA = "http://localhost:8084"
 AUTH = "http://localhost:8085"
 NOTIFICATION = "http://localhost:8086"
+MARKETPLACE = "http://localhost:8087"
+REVIEW = "http://localhost:8088"
+FESTIVAL = "http://localhost:8089"
+COMMUNITY = "http://localhost:8091"
+SEARCH = "http://localhost:8092"
 
 # The gateway. Every address above is what a service listens on directly; this is the one
 # a browser is meant to use. Both are kept, because the point of test_11_gateway.py is to

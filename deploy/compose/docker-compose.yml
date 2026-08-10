@@ -131,7 +131,7 @@ services:
           memory: 192M
 
   kafka:
-    image: bitnami/kafka:3.7
+    image: docker.arvancloud.ir/bitnami/kafka:3.7
     container_name: arcadia-kafka
     restart: unless-stopped
     ports:
