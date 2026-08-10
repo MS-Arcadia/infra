@@ -38,6 +38,7 @@ REVIEW = "http://localhost:8088"
 FESTIVAL = "http://localhost:8089"
 COMMUNITY = "http://localhost:8091"
 SEARCH = "http://localhost:8092"
+RECOMMENDATION = "http://localhost:8093"
 
 # The gateway. Every address above is what a service listens on directly; this is the one
 # a browser is meant to use. Both are kept, because the point of test_11_gateway.py is to
@@ -296,18 +297,33 @@ def stored_object_keys() -> set[str]:
 
 
 def topic_message_count(topic: str) -> int:
+    """How many messages a topic holds, summed over its partitions.
+
+    `kafka-get-offsets.sh`, not `kafka-run-class.sh kafka.tools.GetOffsetShell`. The latter is what this
+    helper used to call and the class **does not exist in the running image** — every invocation failed,
+    `check=False` swallowed it, and the parse loop returned 0. Which meant every "this dead-letter topic is
+    empty" assertion in this suite passed without measuring anything, and would have kept passing with a DLQ
+    full of poison messages.
+
+    So a failure is now raised rather than read as a zero. A topic that was never created is the one case
+    where zero is the honest answer, and it is recognised by its error rather than by any failure at all.
+    """
     result = subprocess.run(
-        ["docker", "exec", KAFKA_CONTAINER, "kafka-run-class.sh",
-         "kafka.tools.GetOffsetShell", "--bootstrap-server", "localhost:9092",
-         "--topic", topic],
+        ["docker", "exec", KAFKA_CONTAINER, "kafka-get-offsets.sh",
+         "--bootstrap-server", "localhost:9092", "--topic", topic],
         capture_output=True,
         text=True,
-        # A topic that was never created exits non-zero, and for these assertions that genuinely
-        # means zero messages — an empty dead-letter topic is the answer they want.
         check=False,
     )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if "UnknownTopicOrPartition" in stderr or "does not exist" in stderr:
+            return 0
+        raise AssertionError(f"could not read offsets for {topic!r}: {stderr[:400]}")
+
     total = 0
     for line in result.stdout.strip().splitlines():
+        # "topic:partition:offset", and an empty partition reports no offset at all.
         parts = line.rsplit(":", 1)
         if len(parts) == 2 and parts[1].strip().isdigit():
             total += int(parts[1])
