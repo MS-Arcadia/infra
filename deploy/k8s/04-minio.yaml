@@ -50,7 +50,7 @@ spec:
             periodSeconds: 5
             failureThreshold: 20
           resources:
-            limits: {memory: 512Mi}
+            limits: {memory: 512Mi, cpu: 200m}
             requests: {memory: 256Mi, cpu: 100m}
       volumes:
         - name: data
@@ -95,7 +95,7 @@ spec:
           volumeMounts:
             - {name: script, mountPath: /setup.sh, subPath: minio-setup.sh}
           resources:
-            limits: {memory: 192Mi}
+            limits: {memory: 192Mi, cpu: 150m}
             requests: {memory: 96Mi, cpu: 50m}
       volumes:
         - name: script

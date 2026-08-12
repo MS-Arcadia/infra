@@ -53,7 +53,7 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
           resources:
-            limits: {memory: 384Mi}
+            limits: {memory: 384Mi, cpu: 300m}
             requests: {memory: 192Mi, cpu: 100m}
       volumes:
         - name: data

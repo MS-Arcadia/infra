@@ -71,7 +71,7 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 15
           resources:
-            limits: {memory: 640Mi}
+            limits: {memory: 640Mi, cpu: 400m}
             requests: {memory: 384Mi, cpu: 200m}
       volumes:
         - name: data
