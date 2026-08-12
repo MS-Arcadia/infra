@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wallet-service
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: wallet-service}
+  template:
+    metadata:
+      labels: {app: wallet-service}
+    spec:
+      containers:
+        - name: wallet-service
+          image: ghcr.io/ms-arcadia/wallet-service:latest
+          ports: [{containerPort: 8080}, {containerPort: 9090}]
+          env:
+            - {name: ENVIRONMENT, value: local}
+            - {name: LOG_LEVEL, value: info}
+            - {name: SERVER_MODE, value: both}
+            - {name: DATABASE_URL, value: "postgres://wallet_user:wallet_pass@postgres:5432/arcadia_wallet?sslmode=disable"}
+            - {name: REDIS_ADDR, value: "redis:6379"}
+            - {name: KAFKA_BROKERS, value: "kafka:9092"}
+            - {name: PAYMENT_SERVICE_GRPC, value: "payment-service:9091"}
+            - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}
+            - {name: SERVICE_TOKEN, value: ""}
+            - {name: GIFT_CARD_PEPPER, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: GIFT_CARD_PEPPER}}}
+            - {name: WALLET_CURRENCY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: WALLET_CURRENCY}}}
+            - {name: JOB_RECONCILE_INTERVAL, value: 2m}
+            - {name: JOB_HOLD_SWEEP_INTERVAL, value: 1m}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8080}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8080}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 128Mi}
+            requests: {memory: 64Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wallet-service
+  namespace: arcadia
+spec:
+  selector: {app: wallet-service}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+    - {name: grpc, port: 9090, targetPort: 9090}

@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: api-gateway}
+  template:
+    metadata:
+      labels: {app: api-gateway}
+    spec:
+      containers:
+        - name: api-gateway
+          image: ghcr.io/ms-arcadia/api-gateway:latest
+          ports: [{containerPort: 8090}]
+          env:
+            - {name: ENVIRONMENT, value: local}
+            - {name: LOG_LEVEL, value: info}
+            - {name: AUTH_SERVICE_URL, value: "http://auth-profile-service:8085"}
+            - {name: WALLET_SERVICE_URL, value: "http://wallet-service:8080"}
+            - {name: PAYMENT_SERVICE_URL, value: "http://payment-service:8081"}
+            - {name: CATALOG_SERVICE_URL, value: "http://catalog-service:8082"}
+            - {name: ORDER_SERVICE_URL, value: "http://order-service:8083"}
+            - {name: MEDIA_SERVICE_URL, value: "http://media-service:8084"}
+            - {name: NOTIFICATION_SERVICE_URL, value: "http://notification-service:8086"}
+            - {name: MARKETPLACE_SERVICE_URL, value: "http://marketplace-service:8087"}
+            - {name: REVIEW_SERVICE_URL, value: "http://review-service:8088"}
+            - {name: FESTIVAL_SERVICE_URL, value: "http://festival-service:8089"}
+            - {name: COMMUNITY_SERVICE_URL, value: "http://community-service:8091"}
+            # The frontend's public origin, not its in-cluster Service address — this is
+            # the browser's Origin header the gateway checks against.
+            # No TLS on this cluster (no cert-manager) — plain http, matching the
+            # existing judge.neda-event.ir ingress's own pattern.
+            - {name: CORS_ORIGINS, value: "http://arcadia.neda-event.ir"}
+            - {name: RATE_LIMIT_PER_MINUTE, value: "600"}
+            - {name: UPSTREAM_TIMEOUT, value: 30s}
+            - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}
+            - {name: JWT_ISSUER, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_ISSUER}}}
+            - {name: JWT_AUDIENCE, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_AUDIENCE}}}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8090}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8090}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 96Mi}
+            requests: {memory: 48Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: arcadia
+spec:
+  selector: {app: api-gateway}
+  ports: [{port: 8090, targetPort: 8090}]

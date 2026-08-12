@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-profile-service
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: auth-profile-service}
+  template:
+    metadata:
+      labels: {app: auth-profile-service}
+    spec:
+      containers:
+        - name: auth-profile-service
+          image: ghcr.io/ms-arcadia/auth-profile-service:latest
+          ports: [{containerPort: 8085}]
+          env:
+            - {name: ENV, value: local}
+            - {name: LOG_LEVEL, value: INFO}
+            - {name: DATABASE_URL, value: "postgresql+asyncpg://auth_user:auth_pass@postgres:5432/arcadia_auth"}
+            - {name: REDIS_URL, value: "redis://redis:6379/1"}
+            - {name: KAFKA_BOOTSTRAP_SERVERS, value: "kafka:9092"}
+            - {name: JWT_ISSUER, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_ISSUER}}}
+            - {name: JWT_AUDIENCE, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_AUDIENCE}}}
+            - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}
+            - {name: SUPER_ADMIN_EMAIL, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: SUPER_ADMIN_EMAIL}}}
+            - {name: SUPER_ADMIN_PASSWORD, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: SUPER_ADMIN_PASSWORD}}}
+            - {name: RATE_LIMIT_REGISTER, value: "200/minute"}
+            - {name: RATE_LIMIT_LOGIN, value: "200/minute"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8085}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8085}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 256Mi}
+            requests: {memory: 128Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-profile-service
+  namespace: arcadia
+spec:
+  selector: {app: auth-profile-service}
+  ports: [{port: 8085, targetPort: 8085}]

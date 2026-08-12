@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: festival-service
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: festival-service}
+  template:
+    metadata:
+      labels: {app: festival-service}
+    spec:
+      containers:
+        - name: festival-service
+          image: ghcr.io/ms-arcadia/festival-service:latest
+          ports: [{containerPort: 8089}]
+          env:
+            - {name: ENVIRONMENT, value: local}
+            - {name: LOG_LEVEL, value: info}
+            - {name: HTTP_PORT, value: "8089"}
+            - {name: DATABASE_URL, value: "postgresql://festival_user:festival_pass@postgres:5432/arcadia_festival"}
+            - {name: KAFKA_BROKERS, value: "kafka:9092"}
+            - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}
+            - {name: JWT_ISSUER, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_ISSUER}}}
+            - {name: JWT_AUDIENCE, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_AUDIENCE}}}
+            - {name: AUTH_PROFILE_BASE_URL, value: "http://auth-profile-service:8085"}
+            - {name: REDIS_URL, value: "redis://redis:6379/4"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8089}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8089}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 160Mi}
+            requests: {memory: 96Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: festival-service
+  namespace: arcadia
+spec:
+  selector: {app: festival-service}
+  ports: [{port: 8089, targetPort: 8089}]

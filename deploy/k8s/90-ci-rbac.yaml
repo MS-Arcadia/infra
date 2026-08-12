@@ -1,0 +1,49 @@
+# Service account CI uses to deploy after a successful image build/push.
+# Scoped to the arcadia namespace only, and only to what `kubectl set image` +
+# `kubectl rollout status/restart` actually touch — no secrets, no other
+# namespaces, no delete.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-deployer
+  namespace: arcadia
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-deployer
+  namespace: arcadia
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ci-deployer
+  namespace: arcadia
+subjects:
+  - kind: ServiceAccount
+    name: ci-deployer
+    namespace: arcadia
+roleRef:
+  kind: Role
+  name: ci-deployer
+  apiGroup: rbac.authorization.k8s.io
+---
+# Long-lived token Secret for the service account (1.24+ no longer auto-creates
+# one). CI needs a static credential it can hold as a GitHub secret; the
+# auto-issued projected tokens from `kubectl create token` expire in an hour
+# and can't be used that way.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-deployer-token
+  namespace: arcadia
+  annotations:
+    kubernetes.io/service-account.name: ci-deployer
+type: kubernetes.io/service-account-token

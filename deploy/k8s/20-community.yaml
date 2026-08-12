@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: community-service
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: community-service}
+  template:
+    metadata:
+      labels: {app: community-service}
+    spec:
+      containers:
+        - name: community-service
+          image: ghcr.io/ms-arcadia/community-service:latest
+          ports: [{containerPort: 8091}]
+          env:
+            - {name: ENVIRONMENT, value: local}
+            - {name: LOG_LEVEL, value: INFO}
+            - {name: HTTP_PORT, value: "8091"}
+            - {name: PERSISTENCE_BACKEND, value: postgres}
+            - {name: MESSAGING_BACKEND, value: kafka}
+            - {name: IDENTITY_BACKEND, value: jwt}
+            - {name: MEDIA_BACKEND, value: http}
+            - {name: CATALOG_BACKEND, value: http}
+            - {name: SEARCH_BACKEND, value: http}
+            - {name: CACHE_BACKEND, value: redis}
+            - {name: REDIS_URL, value: "redis://redis:6379/5"}
+            - {name: DATABASE_URL, value: "postgresql+asyncpg://community_user:community_pass@postgres:5432/arcadia_community"}
+            - {name: KAFKA_BOOTSTRAP_SERVERS, value: "kafka:9092"}
+            - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}
+            - {name: JWT_ISSUER, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_ISSUER}}}
+            - {name: JWT_AUDIENCE, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_AUDIENCE}}}
+            - {name: AUTH_SERVICE_URL, value: "http://auth-profile-service:8085"}
+            - {name: MEDIA_SERVICE_URL, value: "http://media-service:8084"}
+            - {name: CATALOG_SERVICE_URL, value: "http://catalog-service:8082"}
+            - {name: SEARCH_SERVICE_URL, value: "http://search-service:8092"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8091}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8091}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 160Mi}
+            requests: {memory: 96Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: community-service
+  namespace: arcadia
+spec:
+  selector: {app: community-service}
+  ports: [{port: 8091, targetPort: 8091}]

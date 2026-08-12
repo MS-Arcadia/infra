@@ -1,0 +1,39 @@
+# No persistence — matches compose: everything kept here is a rate-limit
+# window with a TTL, losing it on restart costs nothing.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: redis}
+  template:
+    metadata:
+      labels: {app: redis}
+    spec:
+      containers:
+        - name: redis
+          # Routed through ArvanCloud's registry mirror — see 01-postgres.yaml.
+          image: docker.arvancloud.ir/redis:7-alpine
+          args: [redis-server, --save, "", --maxmemory, 64mb, --maxmemory-policy, allkeys-lru]
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec: {command: [redis-cli, ping]}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            limits: {memory: 96Mi}
+            requests: {memory: 48Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: arcadia
+spec:
+  selector: {app: redis}
+  ports:
+    - {port: 6379, targetPort: 6379}

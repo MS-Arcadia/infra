@@ -1,6 +1,7 @@
 # Local configuration. .env.example is committed; .env is not.
 deploy/compose/.env
 deploy/compose/.env.local
+deploy/k8s/.env
 
 # Editor and OS noise
 .idea/

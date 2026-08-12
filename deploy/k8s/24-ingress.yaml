@@ -1,0 +1,38 @@
+# Plain HTTP — no cert-manager on this cluster, same as the existing
+# judge.neda-event.ir ingress. Two hosts, one for the storefront and one for
+# the gateway API, both routed by the cluster's default Traefik controller.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: arcadia-frontend
+  namespace: arcadia
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: arcadia.neda-event.ir
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port: {number: 3000}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: arcadia-gateway
+  namespace: arcadia
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: api.arcadia.neda-event.ir
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port: {number: 8090}

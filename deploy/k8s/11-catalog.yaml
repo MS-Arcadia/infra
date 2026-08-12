@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-service
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: catalog-service}
+  template:
+    metadata:
+      labels: {app: catalog-service}
+    spec:
+      containers:
+        - name: catalog-service
+          image: ghcr.io/ms-arcadia/catalog-service:latest
+          ports: [{containerPort: 8082}]
+          env:
+            - {name: ENVIRONMENT, value: local}
+            - {name: LOG_LEVEL, value: info}
+            - {name: DATABASE_URL, value: "postgresql://catalog_user:catalog_pass@postgres:5432/arcadia_catalog"}
+            - {name: KAFKA_BROKERS, value: "kafka:9092"}
+            - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}
+            - {name: CURRENCY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: WALLET_CURRENCY}}}
+            - {name: REDIS_URL, value: "redis://redis:6379/2"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8082}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8082}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 160Mi}
+            requests: {memory: 96Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-service
+  namespace: arcadia
+spec:
+  selector: {app: catalog-service}
+  ports: [{port: 8082, targetPort: 8082}]

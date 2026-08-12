@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: search-service
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: search-service}
+  template:
+    metadata:
+      labels: {app: search-service}
+    spec:
+      containers:
+        - name: search-service
+          image: ghcr.io/ms-arcadia/search-service:latest
+          ports: [{containerPort: 8092}]
+          env:
+            - {name: ENVIRONMENT, value: local}
+            - {name: LOG_LEVEL, value: INFO}
+            - {name: HTTP_PORT, value: "8092"}
+            - {name: DATABASE_URL, value: "postgresql://search_user:search_pass@postgres:5432/arcadia_search"}
+            - {name: KAFKA_BROKERS, value: "kafka:9092"}
+            - {name: REDIS_URL, value: "redis://redis:6379/3"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8092}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8092}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 160Mi}
+            requests: {memory: 96Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: search-service
+  namespace: arcadia
+spec:
+  selector: {app: search-service}
+  ports: [{port: 8092, targetPort: 8092}]

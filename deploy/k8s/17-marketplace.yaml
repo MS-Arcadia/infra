@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: marketplace-service
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: marketplace-service}
+  template:
+    metadata:
+      labels: {app: marketplace-service}
+    spec:
+      containers:
+        - name: marketplace-service
+          image: ghcr.io/ms-arcadia/marketplace-service:latest
+          ports: [{containerPort: 8087}]
+          env:
+            - {name: ENVIRONMENT, value: local}
+            - {name: LOG_LEVEL, value: info}
+            - {name: DATABASE_URL, value: "postgres://marketplace_user:marketplace_pass@postgres:5432/arcadia_marketplace?sslmode=disable"}
+            - {name: KAFKA_BROKERS, value: "kafka:9092"}
+            - {name: TOPIC_TRADE_EVENTS, value: trade-events}
+            - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}
+            - {name: JWT_ISSUER, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_ISSUER}}}
+            - {name: JWT_AUDIENCE, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_AUDIENCE}}}
+            - {name: WALLET_SERVICE_URL, value: "http://wallet-service:8080"}
+            - {name: SERVICE_TOKEN, value: ""}
+            - {name: MARKETPLACE_CURRENCY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: WALLET_CURRENCY}}}
+            - {name: MATCH_INTERVAL, value: 1m}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8087}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8087}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 128Mi}
+            requests: {memory: 64Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: marketplace-service
+  namespace: arcadia
+spec:
+  selector: {app: marketplace-service}
+  ports: [{port: 8087, targetPort: 8087}]

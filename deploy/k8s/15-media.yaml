@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: media-service
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: media-service}
+  template:
+    metadata:
+      labels: {app: media-service}
+    spec:
+      containers:
+        - name: media-service
+          image: ghcr.io/ms-arcadia/media-service:latest
+          ports: [{containerPort: 8084}]
+          env:
+            - {name: ENVIRONMENT, value: local}
+            - {name: LOG_LEVEL, value: info}
+            - {name: DATABASE_URL, value: "postgresql://media_user:media_pass@postgres:5432/arcadia_media"}
+            - {name: KAFKA_BROKERS, value: "kafka:9092"}
+            - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}
+            - {name: DOWNLOAD_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: MEDIA_DOWNLOAD_SECRET}}}
+            - {name: STORAGE_BACKEND, value: s3}
+            - {name: S3_ENDPOINT_URL, value: "http://minio:9000"}
+            - {name: S3_ACCESS_KEY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: MEDIA_S3_ACCESS_KEY}}}
+            - {name: S3_SECRET_KEY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: MEDIA_S3_SECRET_KEY}}}
+            - {name: S3_BUCKET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: MEDIA_S3_BUCKET}}}
+            - {name: S3_CREATE_BUCKET, value: "false"}
+            - {name: STORAGE_ROOT, value: /var/lib/arcadia/media}
+            - {name: PUBLIC_BASE_URL, value: "http://media-service:8084"}
+            - {name: STORAGE_SOFT_LIMIT_BYTES, value: "5368709120"}
+            - {name: OWNER_QUOTA_BYTES, value: "1073741824"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8084}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8084}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 224Mi}
+            requests: {memory: 128Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: media-service
+  namespace: arcadia
+spec:
+  selector: {app: media-service}
+  ports: [{port: 8084, targetPort: 8084}]

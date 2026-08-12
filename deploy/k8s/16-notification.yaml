@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: notification-service}
+  template:
+    metadata:
+      labels: {app: notification-service}
+    spec:
+      containers:
+        - name: notification-service
+          image: ghcr.io/ms-arcadia/notification-service:latest
+          ports: [{containerPort: 8086}]
+          env:
+            - {name: ENVIRONMENT, value: local}
+            - {name: LOG_LEVEL, value: info}
+            - {name: DATABASE_URL, value: "postgresql://notification_user:notification_pass@postgres:5432/arcadia_notification"}
+            - {name: KAFKA_BROKERS, value: "kafka:9092"}
+            - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}
+            - {name: JWT_ISSUER, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_ISSUER}}}
+            - {name: JWT_AUDIENCE, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_AUDIENCE}}}
+            - {name: TOPIC_GAME_EVENTS, value: game-events}
+            - {name: TOPIC_PURCHASE_EVENTS, value: purchase-events}
+            - {name: TOPIC_USER_EVENTS, value: user-events}
+            - {name: TOPIC_TRADE_EVENTS, value: trade-events}
+            - {name: TOPIC_FESTIVAL_EVENTS, value: festival-events}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8086}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8086}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 208Mi}
+            requests: {memory: 128Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: arcadia
+spec:
+  selector: {app: notification-service}
+  ports: [{port: 8086, targetPort: 8086}]

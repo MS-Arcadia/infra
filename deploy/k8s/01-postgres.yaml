@@ -1,0 +1,72 @@
+# Single Postgres instance, one database/role per service — same layout as
+# infra/deploy/compose/docker-compose.yml, translated to the cluster. The init
+# SQL is loaded into a ConfigMap by the apply script (kubectl create
+# configmap --from-file), not embedded here, so it stays the single source of
+# truth in infra/deploy/postgres/init/01-databases.sql.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: arcadia
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: arcadia
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          # docker.io intermittently 403s from this cluster's network — routed through
+          # ArvanCloud's registry mirror instead of retrying against docker.io directly.
+          image: docker.arvancloud.ir/postgres:16-alpine
+          args: [-c, max_connections=100, -c, shared_buffers=128MB]
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: arcadia-secrets, key: POSTGRES_USER}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: arcadia-secrets, key: POSTGRES_PASSWORD}}
+            - name: POSTGRES_DB
+              value: arcadia
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data, subPath: pgdata}
+            - {name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true}
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, arcadia, -d, arcadia]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits: {memory: 384Mi}
+            requests: {memory: 192Mi, cpu: 100m}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: postgres-data}
+        - name: init
+          configMap: {name: postgres-init}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: arcadia
+spec:
+  selector: {app: postgres}
+  ports:
+    - {port: 5432, targetPort: 5432}

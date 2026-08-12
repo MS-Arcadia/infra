@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: arcadia
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: payment-service}
+  template:
+    metadata:
+      labels: {app: payment-service}
+    spec:
+      containers:
+        - name: payment-service
+          image: ghcr.io/ms-arcadia/payment-service:latest
+          ports: [{containerPort: 8081}, {containerPort: 9091}]
+          env:
+            - {name: ENVIRONMENT, value: local}
+            - {name: LOG_LEVEL, value: info}
+            - {name: DATABASE_URL, value: "postgres://payment_user:payment_pass@postgres:5432/arcadia_payment?sslmode=disable"}
+            - {name: KAFKA_BROKERS, value: "kafka:9092"}
+            - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}
+            - {name: GATEWAY_KIND, value: mock}
+            - {name: GATEWAY_CALLBACK_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: GATEWAY_CALLBACK_SECRET}}}
+            - {name: PAYMENT_CURRENCY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: WALLET_CURRENCY}}}
+            - {name: PUBLIC_BASE_URL, value: "http://payment-service:8081"}
+            - {name: JOB_SWEEP_INTERVAL, value: 1m}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8081}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: 8081}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            limits: {memory: 128Mi}
+            requests: {memory: 64Mi, cpu: 50m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: arcadia
+spec:
+  selector: {app: payment-service}
+  ports:
+    - {name: http, port: 8081, targetPort: 8081}
+    - {name: grpc, port: 9091, targetPort: 9091}

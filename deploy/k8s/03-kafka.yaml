@@ -1,0 +1,89 @@
+# Single-broker KRaft Kafka, same config as compose (no ZooKeeper). Only the
+# in-cluster listener is needed here — there's no host-network EXTERNAL
+# listener to juggle since every client is another pod in this namespace.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kafka-data
+  namespace: arcadia
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  namespace: arcadia
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: kafka}
+  template:
+    metadata:
+      labels: {app: kafka}
+    spec:
+      containers:
+        - name: kafka
+          # docker.io/bitnami/kafka no longer serves pinned tags (only :latest) —
+          # Bitnami moved everything but latest to bitnamilegacy in 2025.
+          image: bitnamilegacy/kafka:3.7.1-debian-12-r9
+          ports:
+            - containerPort: 9092
+            - containerPort: 9093
+          env:
+            - {name: KAFKA_CFG_NODE_ID, value: "1"}
+            - {name: KAFKA_CFG_PROCESS_ROLES, value: "controller,broker"}
+            # localhost, not the kafka Service name: broker and controller are the same
+            # process in this single-node pod, and routing that self-connection through the
+            # ClusterIP failed — this CNI doesn't support a pod hairpinning to itself via its
+            # own Service IP, so the controller channel manager could never connect and the
+            # broker crash-looped waiting to catch up.
+            - {name: KAFKA_CFG_CONTROLLER_QUORUM_VOTERS, value: "1@localhost:9093"}
+            - {name: KAFKA_CFG_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093"}
+            - {name: KAFKA_CFG_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka:9092"}
+            - {name: KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"}
+            - {name: KAFKA_CFG_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER"}
+            - {name: KAFKA_CFG_INTER_BROKER_LISTENER_NAME, value: "PLAINTEXT"}
+            - {name: KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE, value: "false"}
+            - {name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR, value: "1"}
+            - {name: KAFKA_CFG_DEFAULT_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_CFG_NUM_PARTITIONS, value: "1"}
+            - {name: KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS, value: "0"}
+            - {name: KAFKA_HEAP_OPTS, value: "-Xmx384m -Xms256m"}
+            - {name: ALLOW_PLAINTEXT_LISTENER, value: "yes"}
+          volumeMounts:
+            - {name: data, mountPath: /bitnami/kafka}
+          # A TCP check, not `kafka-broker-api-versions.sh`: that command spawns a whole
+          # second JVM every probe interval, and doing that every 10s while the broker's
+          # own JVM is mid-startup starved it of CPU badly enough to trip its internal
+          # controller-catchup timeout and crash-exit before ever becoming ready.
+          readinessProbe:
+            tcpSocket: {port: 9092}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 15
+          resources:
+            limits: {memory: 640Mi}
+            requests: {memory: 384Mi, cpu: 200m}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: kafka-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: arcadia
+spec:
+  selector: {app: kafka}
+  ports:
+    - {name: plaintext, port: 9092, targetPort: 9092}
+    - {name: controller, port: 9093, targetPort: 9093}
