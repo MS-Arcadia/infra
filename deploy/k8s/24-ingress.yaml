@@ -1,15 +1,33 @@
-# Plain HTTP — no cert-manager on this cluster, same as the existing
-# judge.neda-event.ir ingress. Two hosts, one for the storefront and one for
-# the gateway API, both routed by the cluster's default Traefik controller.
+# Public entry points, TLS terminated by Traefik.
+#
+# Certificates come from cert-manager via the letsencrypt-dns-cloudflare
+# ClusterIssuer. That issuer solves the DNS-01 challenge rather than HTTP-01,
+# which is what makes it work here: DNS-01 proves control of the zone through a
+# Cloudflare API token instead of requiring Let's Encrypt to reach port 80 on
+# this cluster, so a certificate is issued even for a host behind Cloudflare's
+# proxy. Each Ingress names its own secretName; cert-manager creates and renews
+# that Secret and Traefik picks it up — nothing here is re-applied on renewal.
+#
+# Changing a host here means changing more than this file. The gateway's CORS
+# allow-list (22-gateway.yaml) and Grafana's root URL (27-grafana.yaml) both
+# name these hosts, and the frontend's NEXT_PUBLIC_API_URL is a *build*
+# argument inlined into the client bundle — repointing it needs a rebuilt image,
+# not an edited environment variable.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: arcadia-frontend
   namespace: arcadia
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-dns-cloudflare
 spec:
   ingressClassName: traefik
+  tls:
+    - hosts:
+        - arcadia.aptcodegen.online
+      secretName: arcadia-frontend-tls
   rules:
-    - host: arcadia.neda-event.ir
+    - host: arcadia.aptcodegen.online
       http:
         paths:
           - path: /
@@ -24,10 +42,16 @@ kind: Ingress
 metadata:
   name: arcadia-gateway
   namespace: arcadia
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-dns-cloudflare
 spec:
   ingressClassName: traefik
+  tls:
+    - hosts:
+        - api.arcadia.aptcodegen.online
+      secretName: arcadia-gateway-tls
   rules:
-    - host: api.arcadia.neda-event.ir
+    - host: api.arcadia.aptcodegen.online
       http:
         paths:
           - path: /
@@ -45,10 +69,16 @@ kind: Ingress
 metadata:
   name: arcadia-grafana
   namespace: arcadia
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-dns-cloudflare
 spec:
   ingressClassName: traefik
+  tls:
+    - hosts:
+        - grafana.arcadia.aptcodegen.online
+      secretName: arcadia-grafana-tls
   rules:
-    - host: grafana.arcadia.neda-event.ir
+    - host: grafana.arcadia.aptcodegen.online
       http:
         paths:
           - path: /

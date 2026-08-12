@@ -31,10 +31,11 @@ spec:
             - {name: COMMUNITY_SERVICE_URL, value: "http://community-service:8091"}
             - {name: RECOMMENDATION_SERVICE_URL, value: "http://recommendation-service:8093"}
             # The frontend's public origin, not its in-cluster Service address — this is
-            # the browser's Origin header the gateway checks against.
-            # No TLS on this cluster (no cert-manager) — plain http, matching the
-            # existing judge.neda-event.ir ingress's own pattern.
-            - {name: CORS_ORIGINS, value: "http://arcadia.neda-event.ir"}
+            # the browser's Origin header the gateway checks against, and it must match
+            # the storefront's Ingress host scheme-for-scheme: a browser on https:// sends
+            # an https:// Origin, and an allow-list holding the http:// spelling rejects
+            # every request with a CORS error rather than a useful status.
+            - {name: CORS_ORIGINS, value: "https://arcadia.aptcodegen.online"}
             - {name: RATE_LIMIT_PER_MINUTE, value: "600"}
             - {name: UPSTREAM_TIMEOUT, value: 30s}
             - {name: JWT_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_SECRET}}}

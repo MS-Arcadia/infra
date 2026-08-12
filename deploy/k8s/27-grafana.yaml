@@ -46,7 +46,10 @@ spec:
             # open internet — no anonymous admin access here.
             - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "false"}
             - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
-            - {name: GF_SERVER_ROOT_URL, value: "http://grafana.arcadia.neda-event.ir"}
+            # Must match the Ingress host and scheme: Grafana builds redirect and
+            # OAuth callback URLs from this, and an http:// root behind an https://
+            # ingress sends browsers to a URL that redirects back in a loop.
+            - {name: GF_SERVER_ROOT_URL, value: "https://grafana.arcadia.aptcodegen.online"}
           volumeMounts:
             - {name: data, mountPath: /var/lib/grafana}
             - {name: datasources, mountPath: /etc/grafana/provisioning/datasources}
