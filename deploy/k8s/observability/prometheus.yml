@@ -17,6 +17,14 @@ global:
 
 rule_files: [/etc/prometheus/alerts.yml]
 
+# Where a firing rule actually goes. Without this block Prometheus evaluates
+# every rule, moves them to `firing`, and notifies nobody — which is how an
+# alert set can look healthy in the UI while being entirely decorative.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
 scrape_configs:
   # Every pod backing a Service in this namespace, one target each.
   #

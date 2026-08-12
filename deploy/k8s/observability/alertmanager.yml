@@ -1,0 +1,63 @@
+# Alertmanager routing.
+#
+# The alert rules already carry the decision this file acts on: `severity: page`
+# means somebody is woken up, `severity: ticket` means it waits for business
+# hours. That split is the whole point of the alert set — see the note at the top
+# of deploy/observability/alerts.yml — and until now nothing consumed it.
+#
+# No pager or Slack webhook is configured, because this deployment has no on-call
+# rotation to route to and a fabricated endpoint would fail silently at exactly
+# the moment it mattered. What is configured is the routing, grouping and
+# inhibition, so that pointing `page` at a real receiver later is one block of
+# config rather than a redesign. Until then alerts land in Alertmanager's own UI
+# and API, which is where the verification below reads them from.
+
+global:
+  # How long to wait for a resolved notification before declaring an alert
+  # resolved on its own. Longer than the longest rule's evaluation gap so a
+  # slow scrape does not look like a recovery.
+  resolve_timeout: 5m
+
+route:
+  # Group by alert name and service so twelve pods failing the same way is one
+  # notification naming the service, not twelve pages.
+  group_by: [alertname, service]
+  # Wait this long for other alerts in the same group before sending the first
+  # notification — a cascading failure arrives as one message rather than a
+  # trickle.
+  group_wait: 30s
+  group_interval: 5m
+  # How long before re-notifying about an alert that is still firing. Four hours
+  # is deliberate: shorter trains people to mute the channel.
+  repeat_interval: 4h
+  receiver: ticket
+
+  routes:
+    # Money and integrity. These are the ones the architecture document marks
+    # P1 — a ledger that does not balance, an event that was dropped, a saga
+    # that moved money and stopped. Short group_wait because minutes matter.
+    - matchers: [severity = "page"]
+      receiver: page
+      group_wait: 10s
+      repeat_interval: 1h
+
+receivers:
+  # Both are sinks for now. Alertmanager still records, groups, inhibits and
+  # exposes them over its API — the notification transport is the only part
+  # missing, and it is the part that needs a real destination to be worth
+  # configuring.
+  - name: page
+  - name: ticket
+
+inhibit_rules:
+  # A service that is down will also breach its error-rate and latency budgets.
+  # Reporting all three is three notifications about one fact, so the outage
+  # suppresses the symptoms it causes.
+  - source_matchers: [alertname = "ServiceDown"]
+    target_matchers: [severity =~ "page|ticket"]
+    equal: [service]
+
+  # Likewise, a page and a ticket about the same service are not two problems.
+  - source_matchers: [severity = "page"]
+    target_matchers: [severity = "ticket"]
+    equal: [alertname, service]

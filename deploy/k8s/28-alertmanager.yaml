@@ -1,0 +1,75 @@
+# Alertmanager — the receiver the alert rules were written for.
+#
+# Until this existed, all thirteen rules in deploy/observability/alerts.yml
+# evaluated correctly and then fired into nothing: Prometheus had no `alerting:`
+# block, so a ledger mismatch or a stalled saga would have shown as a red row on
+# a dashboard nobody was watching and produced no notification at all.
+#
+# Its config is loaded into a ConfigMap by the apply script from
+# infra/deploy/k8s/observability/alertmanager.yml.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alertmanager-data
+  namespace: arcadia
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      # Only the notification log and silences live here — small, but it has to
+      # survive a restart or every silence someone set is lost and every firing
+      # alert re-notifies.
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: arcadia
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: alertmanager}
+  template:
+    metadata:
+      labels: {app: alertmanager}
+    spec:
+      securityContext:
+        fsGroup: 65534
+      containers:
+        - name: alertmanager
+          image: docker.arvancloud.ir/prom/alertmanager:v0.27.0
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+          ports:
+            - {name: http, containerPort: 9093}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alertmanager}
+            - {name: data, mountPath: /alertmanager}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: 9093}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            limits: {memory: 128Mi, cpu: 100m}
+            requests: {memory: 64Mi, cpu: 50m}
+      volumes:
+        - name: config
+          configMap: {name: alertmanager-config}
+        - name: data
+          persistentVolumeClaim: {claimName: alertmanager-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: arcadia
+  # Not scraped: Alertmanager's own metrics are about notification delivery, and
+  # with no notification transport configured there is nothing there worth a
+  # dashboard yet.
+spec:
+  selector: {app: alertmanager}
+  ports: [{name: http, port: 9093, targetPort: 9093}]
