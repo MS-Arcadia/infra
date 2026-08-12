@@ -51,6 +51,37 @@ jobs:
           [ "$failed" -eq 0 ] || exit 1
           echo "no real credentials are committed"
 
+      - name: No real credentials committed (k8s)
+        run: |
+          # Same guard as above for the cluster deployment's own secret file.
+          # deploy/k8s/.env is gitignored and holds the real values; .env.example
+          # is committed and must stay placeholders.
+          if git ls-files --error-unmatch deploy/k8s/.env >/dev/null 2>&1; then
+            echo "deploy/k8s/.env is committed; it must stay local"
+            exit 1
+          fi
+          failed=0
+          while IFS='=' read -r key value; do
+            case "$key" in ''|'#'*) continue ;; esac
+            case "$key" in
+              *SECRET*|*PASSWORD*|*PEPPER*|*API_KEY*|*TOKEN*) ;;
+              *) continue ;;
+            esac
+            case "$value" in
+              *change*|*replace*|*CHANGE*|*REPLACE*|'') ;;
+              *) echo "k8s/.env.example: $key must stay an obvious placeholder"; failed=1 ;;
+            esac
+          done < deploy/k8s/.env.example
+          [ "$failed" -eq 0 ] || exit 1
+          echo "no real credentials are committed"
+
+      - name: Dashboards match their generator
+        # The gen-*.json files are output, not source. Editing one by hand works
+        # until the generator next runs and silently reverts it, so the check is
+        # here rather than in a comment nobody reads.
+        run: |
+          python3 deploy/observability/generate-dashboards.py --check
+
       - name: Config files parse
         run: |
           python3 - <<'PY'
