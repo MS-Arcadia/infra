@@ -1,0 +1,431 @@
+# Horizontal autoscaling for the stateless tier.
+#
+# Only the services are here. The stateful tier (postgres, kafka, minio, redis)
+# is deliberately absent: none of them scales by adding replicas without real
+# clustering — a second postgres pod is not more capacity, it is a second
+# primary, and a second KRaft broker claiming node 1 corrupts the metadata log.
+#
+# Sizing note. This platform is not expecting production traffic; the point of
+# these is that load *cannot* take a service down silently, not that they will
+# ever fire. So the floors are minimal — one replica each, three for the edge —
+# and the CPU target is 70%, well below the limits set per service, so a scale-up
+# begins before requests start queueing rather than after.
+#
+# CPU only, deliberately. A memory target was tried and removed: these runtimes
+# do not return memory when load drops — a Python process that has grown its
+# heap keeps it — so utilisation never falls back below the threshold and the
+# replica count only ever ratchets up. Measured on this cluster at zero traffic,
+# community-service and recommendation-service already sat at ~124% of an 80%
+# memory target, which would have pinned both permanently scaled out. Memory
+# pressure is what the per-container limit is for; CPU is what actually tracks
+# load here.
+#
+# scaleDown is damped to a 5-minute window on every one of them. HPA's default
+# is to remove replicas as soon as the metric drops, and with a 1-replica floor
+# and bursty traffic that produces a pod flapping up and down every few minutes,
+# each cycle costing a cold start.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: api-gateway}
+  # Three, not one: the gateway is the single public entry point, so it is the
+  # one service whose absence is the whole platform being down. Three replicas
+  # across a rolling update or a node drain still leaves two serving.
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # The edge absorbs the burst before any service sees it, so it is allowed
+      # to react fast: no stabilisation window, double or add four at a time.
+      stabilizationWindowSeconds: 0
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 30}
+        - {type: Pods, value: 4, periodSeconds: 30}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+# One PodDisruptionBudget for the edge. Without it, a node drain evicts all
+# three gateway pods at once and the platform is briefly unreachable even
+# though three replicas were requested precisely to prevent that.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-gateway
+  namespace: arcadia
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: {app: api-gateway}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: auth-profile-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: auth-profile-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: catalog-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: catalog-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: wallet-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: wallet-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: payment-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: payment-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: order-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: order-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: media-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: media-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: notification-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: notification-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: marketplace-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: marketplace-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: review-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: review-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: festival-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: festival-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: community-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: community-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: search-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: search-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: recommendation-service
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: recommendation-service}
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend
+  namespace: arcadia
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: frontend}
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+  behavior:
+    scaleUp:
+      # A short window rather than none: these sit behind the gateway, so a
+      # burst reaches them already smoothed and reacting to every spike would
+      # mostly add pods that are idle by the time they are ready.
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}

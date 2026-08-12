@@ -1,9 +1,15 @@
-# Same scrape targets as infra/deploy/observability/prometheus.yml (the compose
-# stack) — the k8s Service names are identical to the compose service names on
-# purpose, so every job here is a copy-paste. Two things are added because they
-# only exist on a cluster: cAdvisor scraping for per-pod CPU/memory, and the
-# `up{namespace="arcadia"}` label cAdvisor's job needs isn't present on the
-# static jobs, so those stay separate rather than merged into one job.
+# Prometheus for the cluster deployment.
+#
+# The compose stack's copy of this file (infra/deploy/observability/prometheus.yml)
+# lists one static target per service, which is correct there — compose runs
+# exactly one container per service. It is *not* correct here: every service now
+# has an HPA and the gateway has a floor of three replicas, and a static target
+# pointing at a Service name resolves through the ClusterIP to one arbitrary pod
+# per scrape. Counters would appear to jump backwards as the load balancer moved
+# between pods with different counts, and `rate()` over that is meaningless.
+#
+# So targets are discovered per-endpoint instead: one target per pod, each with
+# its own series, and `sum by (service)` in the dashboards adds them back up.
 
 global:
   scrape_interval: 15s
@@ -12,47 +18,37 @@ global:
 rule_files: [/etc/prometheus/alerts.yml]
 
 scrape_configs:
-  - job_name: api-gateway
-    static_configs: [{targets: ['api-gateway:8090']}]
-
-  - job_name: auth-profile-service
-    static_configs: [{targets: ['auth-profile-service:8085']}]
-
-  - job_name: wallet-service
-    static_configs: [{targets: ['wallet-service:8080']}]
-
-  - job_name: payment-service
-    static_configs: [{targets: ['payment-service:8081']}]
-
-  - job_name: catalog-service
-    static_configs: [{targets: ['catalog-service:8082']}]
-
-  - job_name: order-service
-    static_configs: [{targets: ['order-service:8083']}]
-
-  - job_name: media-service
-    static_configs: [{targets: ['media-service:8084']}]
-
-  - job_name: notification-service
-    static_configs: [{targets: ['notification-service:8086']}]
-
-  - job_name: marketplace-service
-    static_configs: [{targets: ['marketplace-service:8087']}]
-
-  - job_name: review-service
-    static_configs: [{targets: ['review-service:8088']}]
-
-  - job_name: festival-service
-    static_configs: [{targets: ['festival-service:8089']}]
-
-  - job_name: community-service
-    static_configs: [{targets: ['community-service:8091']}]
-
-  - job_name: search-service
-    static_configs: [{targets: ['search-service:8092']}]
-
-  - job_name: recommendation-service
-    static_configs: [{targets: ['recommendation-service:8093']}]
+  # Every pod backing a Service in this namespace, one target each.
+  #
+  # Opt-in rather than opt-out: a Service is scraped only if it carries the
+  # `arcadia.dev/scrape: "true"` annotation, so adding a Service for something
+  # that has no /metrics does not fill the target list with red.
+  - job_name: arcadia-services
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [arcadia]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_annotation_arcadia_dev_scrape]
+        regex: "true"
+        action: keep
+      # A Service with several ports (wallet and payment each publish HTTP and
+      # gRPC) would otherwise be scraped once per port, and the gRPC port does
+      # not speak Prometheus — so keep the one named `http`, or the only port on
+      # the single-port Services, which is unnamed. Prometheus regexes are RE2
+      # and have no backreferences, so matching a port name against an
+      # annotation is not available; a naming convention is.
+      - source_labels: [__meta_kubernetes_endpoint_port_name]
+        regex: (http|)
+        action: keep
+      # job = the service name, so existing dashboards and alert rules that
+      # select on job="catalog-service" keep working unchanged.
+      - source_labels: [__meta_kubernetes_service_name]
+        target_label: job
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
 
   # Per-pod CPU/memory/network, for the "is the cluster itself okay" half of the
   # overview dashboard — not exposed by any service's own /metrics. Scraped from

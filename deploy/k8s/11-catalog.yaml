@@ -40,6 +40,11 @@ kind: Service
 metadata:
   name: catalog-service
   namespace: arcadia
+  annotations:
+    # Picked up by Prometheus' endpoint discovery — see
+    # infra/deploy/k8s/observability/prometheus.yml. Opt-in, so a Service with no
+    # /metrics never becomes a permanently red target.
+    arcadia.dev/scrape: "true"
 spec:
   selector: {app: catalog-service}
   ports: [{port: 8082, targetPort: 8082}]

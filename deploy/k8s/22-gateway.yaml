@@ -57,6 +57,11 @@ kind: Service
 metadata:
   name: api-gateway
   namespace: arcadia
+  annotations:
+    # Picked up by Prometheus' endpoint discovery — see
+    # infra/deploy/k8s/observability/prometheus.yml. Opt-in, so a Service with no
+    # /metrics never becomes a permanently red target.
+    arcadia.dev/scrape: "true"
 spec:
   selector: {app: api-gateway}
   ports: [{port: 8090, targetPort: 8090}]

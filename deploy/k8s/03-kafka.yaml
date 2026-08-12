@@ -1,26 +1,35 @@
 # Single-broker KRaft Kafka, same config as compose (no ZooKeeper). Only the
 # in-cluster listener is needed here — there's no host-network EXTERNAL
 # listener to juggle since every client is another pod in this namespace.
+#
+# A StatefulSet rather than a Deployment, and for Kafka this is not a
+# formality: a KRaft broker's node id and its log directory are one identity.
+# A Deployment can schedule the replacement pod before the old one is gone, and
+# two brokers claiming node 1 against the same metadata log is how a cluster id
+# mismatch bricks the volume. StatefulSet identity plus OrderedReady makes that
+# ordering a guarantee rather than a hope.
 apiVersion: v1
-kind: PersistentVolumeClaim
+kind: Service
 metadata:
-  name: kafka-data
+  # Headless, for the stable per-pod DNS a StatefulSet needs. The ClusterIP
+  # Service below is what clients set as KAFKA_BROKERS; both exist on purpose.
+  name: kafka-headless
   namespace: arcadia
 spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 5Gi
+  clusterIP: None
+  selector: {app: kafka}
+  ports:
+    - {name: plaintext, port: 9092, targetPort: 9092}
+    - {name: controller, port: 9093, targetPort: 9093}
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: kafka
   namespace: arcadia
 spec:
+  serviceName: kafka-headless
   replicas: 1
-  strategy:
-    type: Recreate
   selector:
     matchLabels: {app: kafka}
   template:
@@ -73,9 +82,14 @@ spec:
           resources:
             limits: {memory: 640Mi, cpu: 400m}
             requests: {memory: 384Mi, cpu: 200m}
-      volumes:
-        - name: data
-          persistentVolumeClaim: {claimName: kafka-data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi
 ---
 apiVersion: v1
 kind: Service

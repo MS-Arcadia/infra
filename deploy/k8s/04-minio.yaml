@@ -1,27 +1,33 @@
-# MinIO for media-service's object storage, plus a one-shot Job (minio-setup)
+# MinIO for media-service's object storage, as a StatefulSet: an object store's
+# drive is its identity, and a replacement pod must reattach to the same one
+# rather than come up empty and quietly serve 404s for every uploaded build.
+#
+# Plus a one-shot Job (minio-setup)
 # that creates the bucket and a scoped service account so media-service never
 # holds the root credentials. Same script infra/deploy/compose/minio-setup.sh
 # uses, loaded into a ConfigMap by the apply script.
 apiVersion: v1
-kind: PersistentVolumeClaim
+kind: Service
 metadata:
-  name: minio-data
+  # Headless, for the stable per-pod DNS a StatefulSet needs. The ClusterIP
+  # Service below is the S3 endpoint media-service is configured with.
+  name: minio-headless
   namespace: arcadia
 spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 5Gi
+  clusterIP: None
+  selector: {app: minio}
+  ports:
+    - {name: api, port: 9000, targetPort: 9000}
+    - {name: console, port: 9001, targetPort: 9001}
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: minio
   namespace: arcadia
 spec:
+  serviceName: minio-headless
   replicas: 1
-  strategy:
-    type: Recreate
   selector:
     matchLabels: {app: minio}
   template:
@@ -52,9 +58,14 @@ spec:
           resources:
             limits: {memory: 512Mi, cpu: 200m}
             requests: {memory: 256Mi, cpu: 100m}
-      volumes:
-        - name: data
-          persistentVolumeClaim: {claimName: minio-data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi
 ---
 apiVersion: v1
 kind: Service

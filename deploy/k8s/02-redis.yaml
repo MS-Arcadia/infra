@@ -1,11 +1,30 @@
 # No persistence — matches compose: everything kept here is a rate-limit
-# window with a TTL, losing it on restart costs nothing.
+# window or a read-through cache entry, all with a TTL, so losing it on restart
+# costs a cleared counter and nothing else.
+#
+# A StatefulSet for consistency with the rest of the stateful tier, but
+# deliberately without a volumeClaimTemplate: giving a cache a disk would change
+# what it is, and the `--save ""` below is the same decision stated twice. What
+# the StatefulSet does buy is ordered replacement — one redis at a time, so the
+# rate limiter never sees two instances disagreeing about a window.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: arcadia
+spec:
+  clusterIP: None
+  selector: {app: redis}
+  ports:
+    - {port: 6379, targetPort: 6379}
+---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: redis
   namespace: arcadia
 spec:
+  serviceName: redis-headless
   replicas: 1
   selector:
     matchLabels: {app: redis}
@@ -19,7 +38,7 @@ spec:
           image: docker.arvancloud.ir/redis:7-alpine
           args: [redis-server, --save, "", --maxmemory, 64mb, --maxmemory-policy, allkeys-lru]
           ports:
-            - containerPort: 6379
+            - {name: redis, containerPort: 6379}
           readinessProbe:
             exec: {command: [redis-cli, ping]}
             initialDelaySeconds: 3

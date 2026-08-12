@@ -13,10 +13,15 @@ kind: ClusterRole
 metadata:
   name: arcadia-prometheus
 rules:
-  # Only what the cadvisor job's `role: node` discovery and its proxied scrape
-  # need — no access to secrets, no write verbs anywhere.
+  # What the cadvisor job's `role: node` discovery and its proxied scrape need.
   - apiGroups: [""]
     resources: [nodes, nodes/metrics, nodes/proxy]
+    verbs: [get, list, watch]
+  # What `role: endpoints` discovery needs. Discovery is a cluster-scoped watch
+  # even though the job restricts itself to the arcadia namespace, so this has
+  # to be a ClusterRole — but it stays read-only and names no secrets.
+  - apiGroups: [""]
+    resources: [services, endpoints, pods]
     verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -3,32 +3,47 @@
 # SQL is loaded into a ConfigMap by the apply script (kubectl create
 # configmap --from-file), not embedded here, so it stays the single source of
 # truth in infra/deploy/postgres/init/01-databases.sql.
+#
+# A StatefulSet rather than a Deployment: the volume belongs to *this* instance,
+# not to whichever pod happens to be running. Under a Deployment the PVC is a
+# separate object that any replacement pod reattaches to, which quietly permits
+# two postgres processes on one data directory during a rolling update — the one
+# thing that corrupts it. volumeClaimTemplates ties storage to pod identity, and
+# the default OrderedReady policy will not start postgres-1 until postgres-0 is
+# gone.
 apiVersion: v1
-kind: PersistentVolumeClaim
+kind: Service
 metadata:
-  name: postgres-data
+  # Headless, for the stable per-pod DNS a StatefulSet needs
+  # (postgres-0.postgres-headless.arcadia.svc). The ClusterIP Service below is
+  # what applications actually connect to; both exist on purpose.
+  name: postgres-headless
   namespace: arcadia
 spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 5Gi
+  clusterIP: None
+  selector: {app: postgres}
+  ports:
+    - {port: 5432, targetPort: 5432}
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: postgres
   namespace: arcadia
 spec:
+  serviceName: postgres-headless
   replicas: 1
-  strategy:
-    type: Recreate
   selector:
     matchLabels: {app: postgres}
   template:
     metadata:
       labels: {app: postgres}
     spec:
+      # postgres:16-alpine runs as uid 70 and the entrypoint drops to it, but a
+      # freshly provisioned local-path volume is owned by root — so the data
+      # directory has to be group-writable by that uid or initdb cannot create it.
+      securityContext:
+        fsGroup: 70
       containers:
         - name: postgres
           # docker.io intermittently 403s from this cluster's network — routed through
@@ -36,7 +51,7 @@ spec:
           image: docker.arvancloud.ir/postgres:16-alpine
           args: [-c, max_connections=100, -c, shared_buffers=128MB]
           ports:
-            - containerPort: 5432
+            - {name: postgres, containerPort: 5432}
           env:
             - name: POSTGRES_USER
               valueFrom: {secretKeyRef: {name: arcadia-secrets, key: POSTGRES_USER}}
@@ -45,6 +60,9 @@ spec:
             - name: POSTGRES_DB
               value: arcadia
           volumeMounts:
+            # subPath pgdata, not the volume root: local-path hands out a
+            # directory that already contains lost+found on some backends, and
+            # initdb refuses a non-empty data directory.
             - {name: data, mountPath: /var/lib/postgresql/data, subPath: pgdata}
             - {name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true}
           readinessProbe:
@@ -56,10 +74,16 @@ spec:
             limits: {memory: 384Mi, cpu: 300m}
             requests: {memory: 192Mi, cpu: 100m}
       volumes:
-        - name: data
-          persistentVolumeClaim: {claimName: postgres-data}
         - name: init
           configMap: {name: postgres-init}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi
 ---
 apiVersion: v1
 kind: Service
