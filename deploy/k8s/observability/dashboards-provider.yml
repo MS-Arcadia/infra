@@ -1,0 +1,13 @@
+# k8s-specific: points at /var/lib/grafana/dashboards rather than the compose
+# stack's /etc/grafana/provisioning/dashboards, because here the provider config
+# and the dashboard JSON files are mounted from two separate ConfigMaps rather
+# than one shared directory.
+apiVersion: 1
+
+providers:
+  - name: Arcadia
+    folder: Arcadia
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

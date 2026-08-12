@@ -36,3 +36,24 @@ spec:
               service:
                 name: api-gateway
                 port: {number: 8090}
+---
+# Grafana only — Prometheus stays ClusterIP-only, no public route. Grafana
+# itself requires login (GF_AUTH_ANONYMOUS_ENABLED=false), so this is not an
+# open admin panel.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: arcadia-grafana
+  namespace: arcadia
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: grafana.arcadia.neda-event.ir
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port: {number: 3000}

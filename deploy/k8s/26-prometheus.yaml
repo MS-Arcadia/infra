@@ -1,0 +1,99 @@
+# prometheus.yml and alerts.yml are loaded into ConfigMaps by the apply script
+# (kubectl create configmap --from-file), from infra/deploy/k8s/observability/
+# and infra/deploy/observability/alerts.yml respectively — the latter stays the
+# single source of truth shared with the compose stack.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: arcadia
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: arcadia-prometheus
+rules:
+  # Only what the cadvisor job's `role: node` discovery and its proxied scrape
+  # need — no access to secrets, no write verbs anywhere.
+  - apiGroups: [""]
+    resources: [nodes, nodes/metrics, nodes/proxy]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: arcadia-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: arcadia
+roleRef:
+  kind: ClusterRole
+  name: arcadia-prometheus
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: arcadia
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 3Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: arcadia
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: prometheus}
+  template:
+    metadata:
+      labels: {app: prometheus}
+    spec:
+      serviceAccountName: prometheus
+      containers:
+        - name: prometheus
+          image: docker.arvancloud.ir/prom/prometheus:v3.0.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            # Short on purpose: this platform isn't expecting real traffic, and a
+            # long retention on a 3Gi volume is how the disk fills before anyone
+            # notices.
+            - --storage.tsdb.retention.time=3d
+          ports: [{containerPort: 9090}]
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus}
+            - {name: data, mountPath: /prometheus}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: 9090}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            limits: {memory: 384Mi, cpu: 200m}
+            requests: {memory: 192Mi, cpu: 50m}
+      volumes:
+        - name: config
+          projected:
+            sources:
+              - configMap: {name: prometheus-config}
+              - configMap: {name: prometheus-alerts}
+        - name: data
+          persistentVolumeClaim: {claimName: prometheus-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: arcadia
+spec:
+  selector: {app: prometheus}
+  ports: [{port: 9090, targetPort: 9090}]

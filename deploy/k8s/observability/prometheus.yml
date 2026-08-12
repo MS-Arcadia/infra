@@ -1,0 +1,81 @@
+# Same scrape targets as infra/deploy/observability/prometheus.yml (the compose
+# stack) — the k8s Service names are identical to the compose service names on
+# purpose, so every job here is a copy-paste. Two things are added because they
+# only exist on a cluster: cAdvisor scraping for per-pod CPU/memory, and the
+# `up{namespace="arcadia"}` label cAdvisor's job needs isn't present on the
+# static jobs, so those stay separate rather than merged into one job.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+
+rule_files: [/etc/prometheus/alerts.yml]
+
+scrape_configs:
+  - job_name: api-gateway
+    static_configs: [{targets: ['api-gateway:8090']}]
+
+  - job_name: auth-profile-service
+    static_configs: [{targets: ['auth-profile-service:8085']}]
+
+  - job_name: wallet-service
+    static_configs: [{targets: ['wallet-service:8080']}]
+
+  - job_name: payment-service
+    static_configs: [{targets: ['payment-service:8081']}]
+
+  - job_name: catalog-service
+    static_configs: [{targets: ['catalog-service:8082']}]
+
+  - job_name: order-service
+    static_configs: [{targets: ['order-service:8083']}]
+
+  - job_name: media-service
+    static_configs: [{targets: ['media-service:8084']}]
+
+  - job_name: notification-service
+    static_configs: [{targets: ['notification-service:8086']}]
+
+  - job_name: marketplace-service
+    static_configs: [{targets: ['marketplace-service:8087']}]
+
+  - job_name: review-service
+    static_configs: [{targets: ['review-service:8088']}]
+
+  - job_name: festival-service
+    static_configs: [{targets: ['festival-service:8089']}]
+
+  - job_name: community-service
+    static_configs: [{targets: ['community-service:8091']}]
+
+  - job_name: search-service
+    static_configs: [{targets: ['search-service:8092']}]
+
+  - job_name: recommendation-service
+    static_configs: [{targets: ['recommendation-service:8093']}]
+
+  # Per-pod CPU/memory/network, for the "is the cluster itself okay" half of the
+  # overview dashboard — not exposed by any service's own /metrics. Scraped from
+  # each node's kubelet, authenticated with this pod's own ServiceAccount token
+  # (see 26-prometheus.yaml's RBAC), then filtered to this namespace: cAdvisor
+  # reports every pod on the node, including judge's, and this deployment has no
+  # business publishing numbers about workloads it doesn't own.
+  - job_name: kubernetes-cadvisor
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+    metric_relabel_configs:
+      - source_labels: [namespace]
+        regex: arcadia
+        action: keep
