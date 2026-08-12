@@ -50,8 +50,21 @@ groups:
 
   - name: arcadia-service-health
     rules:
+      # The three rules below have to speak both metric families. The platform is
+      # written in two languages and each instruments itself idiomatically —
+      # Python exports arcadia_http_*, Go exports arcadia_rpc_* — and a rule
+      # naming only one of them is not a narrower alert, it is an alert that
+      # cannot fire for two thirds of the platform while still looking healthy on
+      # a dashboard. Both carry a `service` label, so `or` unions them.
+      #
+      # The label holding the status code differs too: `status` on the Python
+      # side, `code` on the Go side.
+
       - alert: ServiceDown
-        expr: up{job=~"wallet-service|payment-service"} == 0
+        # Every scrape target, not a hand-listed pair. cadvisor is excluded
+        # because it is the node's kubelet rather than one of this platform's
+        # services, and it has its own failure mode.
+        expr: up{job!="kubernetes-cadvisor"} == 0
         for: 1m
         labels: { severity: page }
         annotations:
@@ -59,9 +72,16 @@ groups:
 
       - alert: HighErrorRate
         # The objective is under 0.1%; this fires at 1%, the "actually broken" threshold.
+        # 5xx only: a 4xx is the caller getting it wrong, and paging on those means
+        # paging every time a scanner probes the storefront.
         expr: |
-          sum by (service) (rate(arcadia_rpc_requests_total{code!~"OK|2..|3.."}[5m]))
-            / sum by (service) (rate(arcadia_rpc_requests_total[5m])) > 0.01
+          (
+            sum by (service) (rate(arcadia_http_requests_total{status=~"5.."}[5m]))
+              / clamp_min(sum by (service) (rate(arcadia_http_requests_total[5m])), 1e-9) > 0.01
+          ) or (
+            sum by (service) (rate(arcadia_rpc_requests_total{code=~"5.."}[5m]))
+              / clamp_min(sum by (service) (rate(arcadia_rpc_requests_total[5m])), 1e-9) > 0.01
+          )
         for: 5m
         labels: { severity: page }
         annotations:
@@ -70,8 +90,13 @@ groups:
       - alert: LatencyBudgetExceeded
         # The objective is a p95 under 300ms; alerting at 500ms leaves room for variance.
         expr: |
-          histogram_quantile(0.95,
-            sum by (service, le) (rate(arcadia_rpc_duration_seconds_bucket[5m]))) > 0.5
+          (
+            histogram_quantile(0.95,
+              sum by (service, le) (rate(arcadia_http_request_duration_seconds_bucket[5m]))) > 0.5
+          ) or (
+            histogram_quantile(0.95,
+              sum by (service, le) (rate(arcadia_rpc_duration_seconds_bucket[5m]))) > 0.5
+          )
         for: 5m
         labels: { severity: ticket }
         annotations:
