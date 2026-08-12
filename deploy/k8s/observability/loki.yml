@@ -1,0 +1,76 @@
+# Loki, single-binary, filesystem storage.
+#
+# Deliberately the smallest useful configuration. Loki's distributed mode splits
+# ingester, querier, distributor and compactor into separate deployments backed
+# by object storage — worth it when log volume outgrows one node, and pure
+# overhead for a platform whose fourteen services produce a few lines a second.
+# MinIO is right there and could back it, but filesystem on a PVC is one fewer
+# dependency in the path between "a service logged something" and "I can read
+# it", and that path is what gets debugged at 3am.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  # Loki logs its own operation at info, which at this scale is mostly noise
+  # about compaction. Warn keeps the signal.
+  log_level: warn
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Seven days. Long enough to look at last week's incident, short enough that a
+  # 5Gi volume is not a countdown to a full disk.
+  retention_period: 168h
+  # Containers restart and clocks drift; without this, a pod that comes back with
+  # a slightly stale clock has its first lines rejected as too old.
+  reject_old_samples: true
+  reject_old_samples_max_age: 24h
+  # One service in a crash loop can otherwise fill the ingester. These are per
+  # tenant, and there is one tenant.
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  max_query_series: 5000
+  # A label with unbounded values — a correlation id, a user id — is what kills
+  # a Loki install. This is the guard rail; the collector's config is where the
+  # actual decision is made.
+  max_label_names_per_series: 15
+  allow_structured_metadata: true
+
+compactor:
+  working_directory: /loki/compactor
+  # Retention is not enforced unless the compactor is told to enforce it. Without
+  # these two lines retention_period above is decoration and the volume fills.
+  retention_enabled: true
+  delete_request_store: filesystem
+
+# No ruler: alerting on logs would duplicate what Prometheus already does from
+# metrics, and Alertmanager is already wired to that.
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /loki/rules
+
+analytics:
+  reporting_enabled: false

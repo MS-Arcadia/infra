@@ -1,0 +1,21 @@
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # Follow a request from a log line into the metrics for the service that
+      # wrote it. The correlation id is not a Loki label — it is a field inside
+      # the JSON line — so this matches it out of the parsed body rather than
+      # from the stream's labels.
+      derivedFields:
+        - name: correlationId
+          # Both spellings are in use: wallet-service logs correlation_id,
+          # the newer Python services log correlationId. Matching either keeps
+          # the link working while that is still inconsistent.
+          matcherRegex: '"correlation_?[Ii]d":"([^"]+)"'
+          url: '/explore?left={"datasource":"loki","queries":[{"expr":"{namespace=\"arcadia\"} |= \"$${__value.raw}\""}]}'
+          datasourceUid: loki

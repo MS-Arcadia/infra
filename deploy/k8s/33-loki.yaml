@@ -1,0 +1,77 @@
+# Loki — where the namespace's container logs land.
+#
+# A StatefulSet, like the rest of the stateful tier: the chunks and the index on
+# this volume belong to this instance, and a Deployment would allow a
+# replacement pod to attach while the old one still holds the index open.
+#
+# Its config is loaded into a ConfigMap by apply.sh from
+# infra/deploy/k8s/observability/loki.yml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki-headless
+  namespace: arcadia
+spec:
+  clusterIP: None
+  selector: {app: loki}
+  ports:
+    - {name: http, port: 3100, targetPort: 3100}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: loki
+  namespace: arcadia
+spec:
+  serviceName: loki-headless
+  replicas: 1
+  selector:
+    matchLabels: {app: loki}
+  template:
+    metadata:
+      labels: {app: loki}
+    spec:
+      # The image runs as uid 10001 and the volume arrives owned by root.
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: loki
+          image: docker.arvancloud.ir/grafana/loki:3.3.2
+          args: [-config.file=/etc/loki/loki.yml]
+          ports:
+            - {name: http, containerPort: 3100}
+          volumeMounts:
+            - {name: config, mountPath: /etc/loki}
+            - {name: data, mountPath: /loki}
+          readinessProbe:
+            httpGet: {path: /ready, port: 3100}
+            # Loki spends the first few seconds replaying its WAL and answers
+            # /ready with 503 until the ingester joins the ring.
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 12
+          resources:
+            limits: {memory: 384Mi, cpu: 300m}
+            requests: {memory: 192Mi, cpu: 50m}
+      volumes:
+        - name: config
+          configMap: {name: loki-config}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            # Seven days of a few lines a second, compressed, with room for the
+            # index. Retention is enforced by the compactor, not by this number.
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: arcadia
+spec:
+  selector: {app: loki}
+  ports: [{name: http, port: 3100, targetPort: 3100}]

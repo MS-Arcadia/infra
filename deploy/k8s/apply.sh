@@ -101,6 +101,11 @@ configmap prometheus-alerts --from-file=alerts.yml=../observability/alerts.yml
 
 configmap alertmanager-config --from-file=alertmanager.yml=observability/alertmanager.yml
 
+# Logging. Both are cluster-only: the compose stack reads container logs with
+# `docker compose logs` and needs no collector.
+configmap loki-config --from-file=loki.yml=observability/loki.yml
+configmap alloy-config --from-file=config.alloy=observability/alloy.alloy
+
 # Grafana: the datasources and dashboards are shared with compose; only the
 # provider config differs, because the k8s deployment mounts the provider and
 # the dashboard JSON from two separate ConfigMaps.

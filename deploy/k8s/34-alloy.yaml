@@ -1,0 +1,100 @@
+# Grafana Alloy — the log collector.
+#
+# Reads pod logs through the Kubernetes API and pushes them to Loki. Its config
+# is loaded into a ConfigMap by apply.sh from
+# infra/deploy/k8s/observability/alloy.alloy, and the reasoning for the
+# API-over-hostPath choice lives at the top of that file.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alloy-state
+  namespace: arcadia
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      # Read positions only — a few kilobytes. It is a volume rather than an
+      # emptyDir because losing the positions means re-reading every container's
+      # log from the beginning on restart, and Loki rejects the resulting old
+      # timestamps as "entry too far behind" once they fall outside its
+      # out-of-order window. Cheap volume, no error spam on every restart.
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: arcadia
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: alloy
+  namespace: arcadia
+rules:
+  # A Role, not a ClusterRole: this collects one namespace's logs and must not
+  # be able to read another tenant's. `pods/log` is the read that matters —
+  # everything else here is what discovery needs to know which pods exist.
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: alloy
+  namespace: arcadia
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: arcadia
+roleRef:
+  kind: Role
+  name: alloy
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alloy
+  namespace: arcadia
+spec:
+  replicas: 1
+  strategy:
+    # Two collectors tailing the same pods at once would double every line for
+    # the length of a rolling update.
+    type: Recreate
+  selector:
+    matchLabels: {app: alloy}
+  template:
+    metadata:
+      labels: {app: alloy}
+    spec:
+      serviceAccountName: alloy
+      containers:
+        - name: alloy
+          image: docker.arvancloud.ir/grafana/alloy:v1.5.1
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/tmp/alloy
+            # Bind the UI to all interfaces so a port-forward can reach it; it
+            # is not exposed through any Service or Ingress.
+            - --server.http.listen-addr=0.0.0.0:12345
+          ports:
+            - {name: http, containerPort: 12345}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alloy}
+            - {name: state, mountPath: /tmp/alloy}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: 12345}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            limits: {memory: 192Mi, cpu: 200m}
+            requests: {memory: 96Mi, cpu: 50m}
+      volumes:
+        - name: config
+          configMap: {name: alloy-config}
+        - name: state
+          persistentVolumeClaim: {claimName: alloy-state}

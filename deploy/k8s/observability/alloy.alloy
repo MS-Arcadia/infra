@@ -1,0 +1,130 @@
+// Grafana Alloy — reads this namespace's container logs and ships them to Loki.
+//
+// Alloy rather than Promtail: Promtail reached end of life in early 2026 and
+// Alloy is its supported successor. The pipeline below is the same shape
+// Promtail's would have been.
+//
+// It reads through the Kubernetes API rather than tailing /var/log/pods from a
+// hostPath. That is the unusual choice here, and it is deliberate:
+//
+//   - no hostPath mount and no privileged container, on a cluster this
+//     namespace shares with somebody else's workloads
+//   - RBAC scoped to reading pods and their logs in one namespace, so this
+//     cannot read logs it has no business reading
+//   - one Deployment instead of a DaemonSet, because API reads are not
+//     node-local
+//
+// The trade is load on the API server, which at twenty-odd pods is negligible.
+// At a few hundred this should become a DaemonSet tailing files.
+
+logging {
+  level  = "warn"
+  format = "logfmt"
+}
+
+// --- discovery ---------------------------------------------------------------
+
+discovery.kubernetes "pods" {
+  role = "pod"
+
+  namespaces {
+    names = ["arcadia"]
+  }
+}
+
+discovery.relabel "pods" {
+  targets = discovery.kubernetes.pods.targets
+
+  // Labels are the index. Every distinct combination of label values is a
+  // separate stream in Loki, so these have to stay low-cardinality: an app name
+  // and a pod name are bounded, a correlation id or a user id is not. The
+  // correlation id stays inside the log line, where a query filters it without
+  // creating a stream per request — see the `| json` examples in the README.
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "namespace"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app"]
+    target_label  = "app"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+
+  // Alloy's own logs would otherwise be shipped by Alloy, which is a loop that
+  // is quiet right up until Alloy starts erroring.
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app"]
+    regex         = "alloy"
+    action        = "drop"
+  }
+}
+
+// --- collection --------------------------------------------------------------
+
+loki.source.kubernetes "pods" {
+  targets    = discovery.relabel.pods.output
+  forward_to = [loki.process.parse.receiver]
+}
+
+loki.process "parse" {
+  // Every service on this platform logs structured JSON with the same shape:
+  // time, level, msg, service. Pulling level and service out makes the common
+  // queries — "errors from wallet in the last hour" — cheap.
+  stage.json {
+    expressions = {
+      level   = "level",
+      service = "service",
+      // The platform is not consistent about what it calls the timestamp: the Go
+      // services and the older Python ones emit `time`, while community and
+      // recommendation emit `timestamp`. Both are extracted and resolved below.
+      // Getting this wrong is not cosmetic — a failed parse falls back to
+      // ingestion time, which stacks a service's entire log history onto the
+      // moment the collector started and makes ordering across services useless.
+      ts_time      = "time",
+      ts_timestamp = "timestamp",
+    }
+  }
+
+  stage.template {
+    source   = "ts"
+    template = "{{ if .ts_time }}{{ .ts_time }}{{ else }}{{ .ts_timestamp }}{{ end }}"
+  }
+
+  // Only these two are promoted to labels. `service` duplicates `app` for most
+  // pods but not all — the log line is what the service calls itself, the pod
+  // label is what the deployment calls it, and when they disagree that is worth
+  // seeing rather than hiding.
+  stage.labels {
+    values = {
+      level   = "",
+      service = "",
+    }
+  }
+
+  // Loki defaults to ingestion time. Using the service's own timestamp keeps
+  // the ordering of a request that crossed four services intact, which is the
+  // entire point of collecting them together.
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339Nano"
+    // Non-JSON lines still reach here — uvicorn's access log, Next.js stack
+    // traces, Loki's own logfmt. They have no timestamp to read, and fudge keeps
+    // them next to the line before rather than dropping them.
+    action_on_failure = "fudge"
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
