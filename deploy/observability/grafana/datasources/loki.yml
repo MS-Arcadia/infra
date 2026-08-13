@@ -12,10 +12,10 @@ datasources:
       # the JSON line — so this matches it out of the parsed body rather than
       # from the stream's labels.
       derivedFields:
-        - name: correlationId
-          # Both spellings are in use: wallet-service logs correlation_id,
-          # the newer Python services log correlationId. Matching either keeps
-          # the link working while that is still inconsistent.
-          matcherRegex: '"correlation_?[Ii]d":"([^"]+)"'
+        - name: correlation_id
+          # One spelling platform-wide now. This used to match either, because
+          # community and recommendation emitted correlationId while the other
+          # twelve services emitted correlation_id.
+          matcherRegex: '"correlation_id":\s*"([^"]+)"'
           url: '/explore?left={"datasource":"loki","queries":[{"expr":"{namespace=\"arcadia\"} |= \"$${__value.raw}\""}]}'
           datasourceUid: loki
