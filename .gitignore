@@ -3,6 +3,11 @@ deploy/compose/.env
 deploy/compose/.env.local
 deploy/k8s/.env
 
+# Python leavings. test/e2e and deploy/seed-demo.py are run in place.
+__pycache__/
+*.pyc
+.pytest_cache/
+
 # Editor and OS noise
 .idea/
 .vscode/
