@@ -18,7 +18,9 @@ spec:
           env:
             - {name: ENVIRONMENT, value: local}
             - {name: LOG_LEVEL, value: INFO}
-            - {name: HTTP_PORT, value: "8091"}
+            # No HTTP_PORT here: this service binds 8091 in its Dockerfile CMD
+            # and reads no such variable, so setting one only suggests the port
+            # is configurable when it is not.
             - {name: PERSISTENCE_BACKEND, value: postgres}
             - {name: MESSAGING_BACKEND, value: kafka}
             - {name: IDENTITY_BACKEND, value: jwt}
