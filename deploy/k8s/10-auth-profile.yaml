@@ -28,17 +28,30 @@ spec:
             - {name: SUPER_ADMIN_PASSWORD, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: SUPER_ADMIN_PASSWORD}}}
             - {name: RATE_LIMIT_REGISTER, value: "200/minute"}
             - {name: RATE_LIMIT_LOGIN, value: "200/minute"}
+          # Both probes get 5s rather than the default 1s. This service hashes passwords with
+          # bcrypt on the event loop thread, so while a login is being hashed nothing else —
+          # including /livez — is answered. At the old 150m limit that regularly took longer
+          # than a second, the liveness probe failed three times and the kubelet killed a pod
+          # that was doing exactly what it was asked to do.
           readinessProbe:
             httpGet: {path: /readyz, port: 8085}
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet: {path: /livez, port: 8085}
             initialDelaySeconds: 15
             periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          # bcrypt is deliberately expensive, and this is the only service that runs it. A
+          # 150m limit is under a fifth of a core, which turned every sign-in into seconds of
+          # throttled CPU: a handful of logins in a row was enough to take auth down. The
+          # request stays small because the cost is bursty — a limit is a ceiling for a spike,
+          # not a reservation — so idle cost is unchanged and the node is not over-committed.
           resources:
-            limits: {memory: 256Mi, cpu: 150m}
-            requests: {memory: 128Mi, cpu: 50m}
+            limits: {memory: 256Mi, cpu: "1"}
+            requests: {memory: 128Mi, cpu: 100m}
 ---
 apiVersion: v1
 kind: Service
