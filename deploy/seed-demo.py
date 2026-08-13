@@ -45,6 +45,7 @@ import urllib.error
 import urllib.request
 import uuid
 import zlib
+from datetime import UTC, datetime, timedelta
 
 API = os.environ.get("ARCADIA_API", "https://api.arcadia.aptcodegen.online").rstrip("/")
 ADMIN_EMAIL = os.environ.get("SUPER_ADMIN_EMAIL", "")
@@ -372,7 +373,7 @@ POSTS = {
 }
 
 
-def add_activity(tokens: dict[str, str], player_id: str) -> None:
+def add_activity(tokens: dict[str, str], player_id: str) -> dict:
     """Money, a purchase, a review and a post.
 
     A storefront with games but no activity still demos as a shell: the library is empty, the
@@ -477,6 +478,109 @@ def add_activity(tokens: dict[str, str], player_id: str) -> None:
         )
         print(f"  posted about {title}")
 
+    return by_title
+
+
+FESTIVAL_NAME = "Winter Arcade"
+ITEM_TITLE = "Chrome Chassis"
+
+
+def add_festival(admin_token: str, by_title: dict) -> None:
+    """A running festival with games on it.
+
+    The festivals screen is one of the more interesting things to show and it renders as an
+    empty list until somebody creates one.
+    """
+    existing = call("GET", "/festivals/v1/festivals")
+    items = existing.get("items", existing) if isinstance(existing, dict) else existing
+    if any(f["name"] == FESTIVAL_NAME for f in items):  # type: ignore[union-attr]
+        return
+
+    now = datetime.now(UTC)
+    festival = call(
+        "POST",
+        "/festivals/v1/festivals",
+        token=admin_token,
+        body={
+            "name": FESTIVAL_NAME,
+            "description": "Two weeks of discounts across the catalogue.",
+            "starts_at": (now + timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
+            "ends_at": (now + timedelta(days=14)).isoformat().replace("+00:00", "Z"),
+        },
+    )
+    festival_id = festival["id"]  # type: ignore[index]
+
+    for title in ("Neon Drift", "Paper Kingdoms", "Ironworks"):
+        game = by_title.get(title)
+        if game:
+            call(
+                "POST",
+                f"/festivals/v1/festivals/{festival_id}/games",
+                token=admin_token,
+                body={"game_id": game["id"]},
+            )
+
+    # Started explicitly rather than waiting for its own start time to arrive: a festival
+    # that begins in a minute is not something to demonstrate a minute from now.
+    call("POST", f"/festivals/v1/festivals/{festival_id}/start", token=admin_token)
+    print(f"  opened the {FESTIVAL_NAME} festival with 3 games")
+
+
+def add_marketplace(tokens: dict[str, str], ids: dict[str, str], by_title: dict) -> None:
+    """A tradeable item, holdings, and a book with something in it.
+
+    Item trading is requirement 1.6 and the screen is unreadable with nothing on it — an
+    empty order book looks identical to a broken one. This leaves a resting order on each
+    side and one executed trade, so the page shows a real market.
+    """
+    listing = call("GET", "/marketplace/v1/items")
+    items = listing.get("items", listing) if isinstance(listing, dict) else listing
+    if any(item["title"] == ITEM_TITLE for item in items):  # type: ignore[union-attr]
+        return
+
+    game = by_title.get("Neon Drift")
+    if game is None:
+        return
+
+    art = next((m["media_ref"] for m in game["media"]), "")
+    item = call(
+        "POST",
+        "/marketplace/v1/items",
+        token=tokens["DEVELOPER"],
+        body={
+            "game_id": game["id"],
+            "title": ITEM_TITLE,
+            "description": "A rare chassis skin. Drops once per season.",
+            "image_url": art,
+            "buy_value": "120000",
+            "sell_value": "90000",
+        },
+    )
+    item_id = item["id"]  # type: ignore[index]
+
+    # Granted rather than distributed at random: a market has to be started, and the demo
+    # needs to know who holds what.
+    call(
+        "POST",
+        f"/marketplace/v1/items/{item_id}/grant",
+        token=tokens["SUPPORT"],
+        body={"user_ids": [ids["DEVELOPER"], ids["BASIC_USER"]]},
+    )
+
+    # One matching pair, and one resting order on each side so the book is not empty after
+    # the pair trades.
+    call("POST", "/marketplace/v1/orders", token=tokens["DEVELOPER"],
+         body={"item_id": item_id, "side": "SELL", "price": "100000"})
+    call("POST", "/marketplace/v1/orders", token=tokens["BASIC_USER"],
+         body={"item_id": item_id, "side": "BUY", "price": "100000"})
+    call("POST", "/marketplace/v1/admin/matching/run", token=tokens["SUPPORT"])
+
+    call("POST", "/marketplace/v1/orders", token=tokens["BASIC_USER"],
+         body={"item_id": item_id, "side": "BUY", "price": "85000"})
+    call("POST", "/marketplace/v1/orders", token=tokens["DEVELOPER"],
+         body={"item_id": item_id, "side": "SELL", "price": "115000"})
+    print(f"  listed {ITEM_TITLE} with a live order book")
+
 
 def main() -> int:
     if not ADMIN_EMAIL or not ADMIN_PASSWORD:
@@ -510,7 +614,20 @@ def main() -> int:
         print(f"  + {spec['title']}")
         added += 1
 
-    add_activity(tokens, ids["BASIC_USER"])
+    by_title = add_activity(tokens, ids["BASIC_USER"])
+
+    # The storefront is the demo; these are extras on top of it. One service being unwell
+    # should leave the rest of the content seeded rather than abandoning the run — and it
+    # says which one and why, because a seeder that swallows a failure is worse than one
+    # that stops.
+    for name, seed in (
+        ("festival", lambda: add_festival(admin_token, by_title)),
+        ("marketplace", lambda: add_marketplace(tokens, ids, by_title)),
+    ):
+        try:
+            seed()
+        except ApiError as error:
+            print(f"  ! could not seed the {name}: {error}")
 
     total = len(published_titles())
     print(f"\n{added} published, {total} on the storefront")

@@ -25,6 +25,10 @@ spec:
             - {name: JWT_ISSUER, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_ISSUER}}}
             - {name: JWT_AUDIENCE, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_AUDIENCE}}}
             - {name: WALLET_SERVICE_URL, value: "http://wallet-service:8080"}
+            # Empty on purpose: the service then signs its own SERVICE-role token from the
+            # shared JWT_SECRET for each wallet read, which is the same arrangement
+            # wallet-service uses to call payment. There is no separate credential to
+            # provision, and nothing here expires.
             - {name: SERVICE_TOKEN, value: ""}
             - {name: MARKETPLACE_CURRENCY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: WALLET_CURRENCY}}}
             - {name: MATCH_INTERVAL, value: 1m}
