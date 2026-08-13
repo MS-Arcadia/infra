@@ -29,7 +29,12 @@ spec:
             - {name: S3_BUCKET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: MEDIA_S3_BUCKET}}}
             - {name: S3_CREATE_BUCKET, value: "false"}
             - {name: STORAGE_ROOT, value: /var/lib/arcadia/media}
-            - {name: PUBLIC_BASE_URL, value: "http://media-service:8084"}
+            # media-service signs absolute download URLs with this prefix and hands them to
+            # the catalogue, which hands them to a browser. A cluster-internal name resolves
+            # nowhere outside the cluster, so every game cover on the site was a broken image
+            # while the API returned a perfectly correct URL. It goes through the gateway,
+            # which strips /media before forwarding.
+            - {name: PUBLIC_BASE_URL, value: "https://api.arcadia.aptcodegen.online/media"}
             - {name: STORAGE_SOFT_LIMIT_BYTES, value: "5368709120"}
             - {name: OWNER_QUOTA_BYTES, value: "1073741824"}
           readinessProbe:

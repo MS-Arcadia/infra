@@ -24,7 +24,12 @@ spec:
             - {name: GATEWAY_KIND, value: mock}
             - {name: GATEWAY_CALLBACK_SECRET, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: GATEWAY_CALLBACK_SECRET}}}
             - {name: PAYMENT_CURRENCY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: WALLET_CURRENCY}}}
-            - {name: PUBLIC_BASE_URL, value: "http://payment-service:8081"}
+            # Both the sandbox bank page and the callback links printed on it are followed by
+            # a browser, so this has to be the ingress hostname — the service's own config
+            # says so. Through the gateway, which strips /payment before forwarding.
+            - {name: PUBLIC_BASE_URL, value: "https://api.arcadia.aptcodegen.online/payment"}
+            # Where the bank sends the payer back. Without it a top-up ends on localhost:3000.
+            - {name: DEFAULT_RETURN_URL, value: "https://arcadia.aptcodegen.online/wallet"}
             - {name: JOB_SWEEP_INTERVAL, value: 1m}
           readinessProbe:
             httpGet: {path: /readyz, port: 8081}
