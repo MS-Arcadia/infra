@@ -16,8 +16,13 @@ spec:
           image: ghcr.io/ms-arcadia/review-service:latest
           ports: [{containerPort: 8088}]
           env:
-            - {name: ENVIRONMENT, value: local}
-            - {name: LOG_LEVEL, value: info}
+            # APP_ENV, not ENVIRONMENT: this service's Settings reads APP_ENV and
+            # nothing reads ENVIRONMENT or LOG_LEVEL, so both were inert. The
+            # consequence was not cosmetic — setup_logging picks the coloured
+            # console formatter and DEBUG level for anything that is not
+            # "production", so this service alone shipped ANSI-escaped text into
+            # the shared log stream where every other service emits JSON.
+            - {name: APP_ENV, value: production}
             - {name: HTTP_PORT, value: "8088"}
             - {name: DATABASE_URL, value: "postgresql+asyncpg://review_user:review_pass@postgres:5432/arcadia_review"}
             - {name: KAFKA_BOOTSTRAP_SERVERS, value: "kafka:9092"}
