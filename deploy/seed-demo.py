@@ -35,10 +35,12 @@ whoever is demonstrating. That is fine for a demo platform and is not fine anywh
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import struct
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -67,7 +69,10 @@ def call(
     *,
     token: str = "",
     body: dict | None = None,
-    expect: tuple[int, ...] = (200, 201, 204),
+    # 202 belongs here: placing an order starts a saga across the wallet and the catalogue,
+    # so the order service accepts the request rather than reporting it done.
+    expect: tuple[int, ...] = (200, 201, 202, 204),
+    headers: dict[str, str] | None = None,
 ) -> object:
     """One JSON request against the gateway."""
     data = json.dumps(body).encode() if body is not None else None
@@ -76,6 +81,8 @@ def call(
         request.add_header("Content-Type", "application/json")
     if token:
         request.add_header("Authorization", f"Bearer {token}")
+    for name, value in (headers or {}).items():
+        request.add_header(name, value)
 
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
@@ -159,6 +166,18 @@ def login(email: str, password: str) -> str:
     return result["access_token"]  # type: ignore[index]
 
 
+def subject_of(token: str) -> str:
+    """The user id inside an access token.
+
+    Read, not verified — this script holds no signing key and does not need one. The token
+    was just issued by the service to this caller, and the id is only used to ask "have I
+    already left a review", so a forged one would fool nobody but the forger.
+    """
+    payload = token.split(".")[1]
+    padded = payload + "=" * (-len(payload) % 4)
+    return json.loads(base64.urlsafe_b64decode(padded))["sub"]
+
+
 def ensure_account(admin_token: str, email: str, display_name: str, role: str) -> tuple[str, str]:
     """An active account with the role asked for, whether or not it existed already.
 
@@ -166,7 +185,8 @@ def ensure_account(admin_token: str, email: str, display_name: str, role: str) -
     means walking that decision too, exactly as the admin screen would.
     """
     try:
-        return "", login(email, DEMO_PASSWORD)
+        token = login(email, DEMO_PASSWORD)
+        return subject_of(token), token
     except ApiError as error:
         if error.status not in (401, 403, 404):
             raise
@@ -322,6 +342,142 @@ def publish_game(spec: dict, developer: str, support: str) -> str:
     return game_id
 
 
+def multipart_fields(path: str, *, token: str, fields: dict[str, str]) -> dict:
+    """A multipart POST with no file. community-service takes posts this way only."""
+    boundary = f"----arcadia{uuid.uuid4().hex}"
+    payload = b"".join(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode()
+        for name, value in fields.items()
+    ) + f"--{boundary}--\r\n".encode()
+
+    request = urllib.request.Request(f"{API}{path}", data=payload, method="POST")
+    request.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        raise ApiError("POST", path, error.code, error.read()[:300].decode(errors="replace")) from None
+
+
+REVIEWS = {
+    "Neon Drift": "Thirty hours in and I still take the coast route badly. That is the compliment.",
+    "Deep Signal": "I turned the torch off once to save battery and did not do it again.",
+}
+POSTS = {
+    "Neon Drift": (
+        "Anyone else running this on a laptop? Dropping shadows to medium got me a steady 60 "
+        "and I genuinely cannot see the difference at speed."
+    ),
+}
+
+
+def add_activity(tokens: dict[str, str], player_id: str) -> None:
+    """Money, a purchase, a review and a post.
+
+    A storefront with games but no activity still demos as a shell: the library is empty, the
+    wallet is empty, every game says "no reviews yet" and the community feed is blank. This
+    fills those in the only way that is honest — by actually buying something.
+
+    Each step is skipped if it has already happened, so re-running does not buy the same game
+    twice (the platform would refuse anyway, which is the point of that rule).
+    """
+    balance = call("GET", "/wallet/v1/wallets/me", token=tokens["BASIC_USER"])
+    if int(balance["balance"]["amount_minor"]) < 1_000_000:  # type: ignore[index]
+        issued = call(
+            "POST",
+            "/wallet/v1/gift-cards",
+            token=tokens["SUPPORT"],
+            body={
+                "value": {"amount_minor": "9000000", "currency": "IRR"},
+                "quantity": 1,
+                "note": "demo seed",
+            },
+            headers={"Idempotency-Key": f"seed-{uuid.uuid4().hex}"},
+        )
+        code = issued["gift_cards"][0]["code"]  # type: ignore[index]
+        call(
+            "POST",
+            "/wallet/v1/wallets/me/gift-cards/redeem",
+            token=tokens["BASIC_USER"],
+            body={"code": code},
+            headers={"Idempotency-Key": f"seed-redeem-{uuid.uuid4().hex}"},
+        )
+        print("  funded the demo player with a gift card")
+
+    catalogue = call("GET", "/catalog/v1/games?limit=100")
+    by_title = {g["title"]: g for g in catalogue["items"]}  # type: ignore[index,union-attr]
+    title_of = {g["id"]: g["title"] for g in catalogue["items"]}  # type: ignore[index,union-attr]
+
+    def owned_titles() -> set[str]:
+        """The library answers ownership records carrying a game_id and no title."""
+        library = call("GET", "/catalog/v1/library", token=tokens["BASIC_USER"])
+        return {
+            title_of[entry["game_id"]]  # type: ignore[index]
+            for entry in library["items"]  # type: ignore[index,union-attr]
+            if entry["game_id"] in title_of
+        }
+
+    owned = owned_titles()
+
+    for title in REVIEWS:
+        game = by_title.get(title)
+        if game is None or title in owned:
+            continue
+        call(
+            "POST",
+            "/orders/v1/orders",
+            token=tokens["BASIC_USER"],
+            body={"game_id": game["id"]},
+            # Mandatory, never defaulted — the same header the storefront now attaches to
+            # every write. Keyed by game so a re-run cannot buy the same title twice.
+            headers={"Idempotency-Key": f"seed-order-{game['id']}"},
+        )
+        print(f"  bought {title}")
+
+    # A purchase is a saga across the wallet and the catalogue, so ownership arrives shortly
+    # after the order does. Reviewing a game needs it, so wait for it rather than racing.
+    for _ in range(10):
+        owned = owned_titles()
+        if all(title in owned for title in REVIEWS if title in by_title):
+            break
+        time.sleep(1.5)
+
+    existing_reviews = {
+        review["game_id"]
+        for title in REVIEWS
+        if (game := by_title.get(title))
+        for review in call("GET", f"/reviews/api/reviews/game/{game['id']}")["reviews"]  # type: ignore[index]
+        if review["author_id"] == player_id
+    }
+
+    for title, text in REVIEWS.items():
+        game = by_title.get(title)
+        if game is None or title not in owned or game["id"] in existing_reviews:
+            continue
+        call(
+            "POST",
+            "/reviews/api/reviews/",
+            token=tokens["BASIC_USER"],
+            body={"game_id": game["id"], "text": text, "sentiment": "LIKE"},
+        )
+        print(f"  reviewed {title}")
+
+    for title, text in POSTS.items():
+        game = by_title.get(title)
+        if game is None:
+            continue
+        feed = call("GET", f"/community/v1/games/{game['id']}/feed")
+        if feed.get("items"):  # type: ignore[union-attr]
+            continue
+        multipart_fields(
+            "/community/v1/posts/multipart",
+            token=tokens["BASIC_USER"],
+            fields={"game_id": game["id"], "body": text, "spoiler": "false"},
+        )
+        print(f"  posted about {title}")
+
+
 def main() -> int:
     if not ADMIN_EMAIL or not ADMIN_PASSWORD:
         print("SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must be set", file=sys.stderr)
@@ -337,9 +493,11 @@ def main() -> int:
         ("player@arcadia.example", "Nadia Farr", "BASIC_USER"),
     ]
     tokens: dict[str, str] = {}
+    ids: dict[str, str] = {}
     for email, name, role in accounts:
-        _, token = ensure_account(admin_token, email, name, role)
+        user_id, token = ensure_account(admin_token, email, name, role)
         tokens[role] = token
+        ids[role] = user_id
         print(f"  {role:<10} {email}")
 
     existing = published_titles()
@@ -351,6 +509,8 @@ def main() -> int:
         publish_game(spec, tokens["DEVELOPER"], tokens["SUPPORT"])
         print(f"  + {spec['title']}")
         added += 1
+
+    add_activity(tokens, ids["BASIC_USER"])
 
     total = len(published_titles())
     print(f"\n{added} published, {total} on the storefront")
