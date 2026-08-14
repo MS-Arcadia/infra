@@ -148,3 +148,7 @@ GRANT  ALL ON SCHEMA public TO search_user;
 \connect arcadia_recommendation
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT  ALL ON SCHEMA public TO recommendation_user;
+-- The only service that needs an extension. Created here, as superuser, rather than left to the service's
+-- own migration: recommendation_user owns this database and could create a trusted extension itself, but
+-- doing it once at provisioning keeps the grant question out of a migration that runs on every boot.
+CREATE EXTENSION IF NOT EXISTS vector;

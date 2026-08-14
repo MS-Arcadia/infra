@@ -39,16 +39,19 @@ spec:
     metadata:
       labels: {app: postgres}
     spec:
-      # postgres:16-alpine runs as uid 70 and the entrypoint drops to it, but a
+      # The postgres image runs as uid 999 and the entrypoint drops to it, but a
       # freshly provisioned local-path volume is owned by root — so the data
       # directory has to be group-writable by that uid or initdb cannot create it.
+      # (The alpine tag this replaced used uid 70; pgvector's is Debian-based.)
       securityContext:
-        fsGroup: 70
+        fsGroup: 999
       containers:
         - name: postgres
+          # pgvector/pgvector:pg16 rather than the stock image: identical to postgres:16 apart from the
+          # `vector` extension, which the Recommendation service's semantic embeddings need.
           # docker.io intermittently 403s from this cluster's network — routed through
           # ArvanCloud's registry mirror instead of retrying against docker.io directly.
-          image: docker.arvancloud.ir/postgres:16-alpine
+          image: docker.arvancloud.ir/pgvector/pgvector:pg16
           args: [-c, max_connections=100, -c, shared_buffers=128MB]
           ports:
             - {name: postgres, containerPort: 5432}

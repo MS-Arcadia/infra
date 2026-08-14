@@ -30,6 +30,27 @@ spec:
             - {name: JWT_AUDIENCE, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: JWT_AUDIENCE}}}
             - {name: GENERATION_ENABLED, value: "true"}
             - {name: GENERATION_INTERVAL_SECONDS, value: "300"}
+            # Which space the content half ranks in — `sparse` is genre/tag cosine and needs nothing
+            # behind it, `dense` is semantic and needs a real embedding endpoint. Both vectors are
+            # ingested either way, so flipping this is a rollout, not a migration.
+            - {name: SCORING_BACKEND, value: sparse}
+            # `hashing` is the in-process fallback; `huggingface` needs EMBEDDING_ENDPOINT alongside it or
+            # the pod refuses to start. The keys are optional so the deployment still comes up against a
+            # secret created before they existed.
+            - {name: EMBEDDING_BACKEND, value: hashing}
+            - {name: EMBEDDING_ENDPOINT, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: EMBEDDING_ENDPOINT, optional: true}}}
+            - {name: EMBEDDING_API_KEY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: EMBEDDING_API_KEY, optional: true}}}
+            # Baked into the `vector(n)` column: changing it needs a migration and a re-embedding.
+            - {name: EMBEDDING_DIMENSIONS, value: "1024"}
+            - {name: EMBEDDING_PREFIX, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: EMBEDDING_PREFIX, optional: true}}}
+            # Writes the `reasons` on each suggestion, one call per user per sweep and never on the read
+            # path. `none` leaves the field empty rather than failing a list.
+            - {name: EXPLANATION_BACKEND, value: none}
+            - {name: EXPLANATION_BASE_URL, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: EXPLANATION_BASE_URL, optional: true}}}
+            - {name: EXPLANATION_API_KEY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: EXPLANATION_API_KEY, optional: true}}}
+            # Paired with https://api.llm7.io/v1 in the secret; it honours response_format: json_object,
+            # which is how the reasons come back parseable.
+            - {name: EXPLANATION_MODEL, value: gemini-3.1-flash-lite}
           readinessProbe:
             httpGet: {path: /readyz, port: 8093}
             initialDelaySeconds: 10

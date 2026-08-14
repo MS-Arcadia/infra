@@ -17,7 +17,10 @@ name: arcadia
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector's image rather than the stock one: it is postgres:16 with the `vector` extension compiled in,
+    # identical in every other respect, and the Recommendation service's semantic embeddings need the type.
+    # Debian-based, so it is larger than the alpine tag it replaced — the extension has no alpine variant.
+    image: pgvector/pgvector:pg16
     container_name: arcadia-postgres
     restart: unless-stopped
     environment:
@@ -650,6 +653,27 @@ services:
       # which is what the end-to-end suite uses rather than waiting five minutes.
       GENERATION_ENABLED: "true"
       GENERATION_INTERVAL_SECONDS: 300
+      # Which space the content half ranks in. `sparse` is genre/tag cosine and needs nothing; `dense` is
+      # semantic embeddings and needs an embedding endpoint behind it. Both vectors are ingested either way,
+      # so flipping this is a restart rather than a migration — which is the point of having both.
+      SCORING_BACKEND: ${RECOMMENDATION_SCORING_BACKEND:-sparse}
+      # Defaults to a deterministic in-process hash, which keeps the dense path runnable on a laptop with
+      # no key: it recovers word overlap and nothing more. `huggingface` needs the endpoint set alongside
+      # it — the service refuses to boot without one rather than leaving the catalogue silently unembedded.
+      EMBEDDING_BACKEND: ${RECOMMENDATION_EMBEDDING_BACKEND:-hashing}
+      EMBEDDING_ENDPOINT: ${RECOMMENDATION_EMBEDDING_ENDPOINT:-}
+      EMBEDDING_API_KEY: ${RECOMMENDATION_EMBEDDING_API_KEY:-}
+      # Fixed in the `vector(n)` column: changing it needs a migration and a re-embedding of the catalogue.
+      EMBEDDING_DIMENSIONS: ${RECOMMENDATION_EMBEDDING_DIMENSIONS:-1024}
+      # Empty suits bge-m3 and all-MiniLM; the e5 family wants "query: " and ranks measurably worse
+      # without it. Changing it invalidates every stored vector.
+      EMBEDDING_PREFIX: ${RECOMMENDATION_EMBEDDING_PREFIX:-}
+      # Writes the `reasons` on each suggestion. One call per user per sweep, never on the read path — a
+      # provider outage costs a list without reasons, not a list.
+      EXPLANATION_BACKEND: ${RECOMMENDATION_EXPLANATION_BACKEND:-none}
+      EXPLANATION_BASE_URL: ${RECOMMENDATION_EXPLANATION_BASE_URL:-}
+      EXPLANATION_API_KEY: ${RECOMMENDATION_EXPLANATION_API_KEY:-}
+      EXPLANATION_MODEL: ${RECOMMENDATION_EXPLANATION_MODEL:-gemini-3.1-flash-lite}
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
