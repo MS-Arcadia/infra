@@ -24,6 +24,9 @@ spec:
             - {name: PLATFORM_USER_ID, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: PLATFORM_USER_ID}}}
             - {name: CATALOG_BASE_URL, value: "http://catalog-service:8082"}
             - {name: WALLET_BASE_URL, value: "http://wallet-service:8080"}
+            # Asked one question before a gift is charged: does the recipient exist. Without
+            # it a gift to a mistyped id completes and the money is gone.
+            - {name: AUTH_BASE_URL, value: "http://auth-profile-service:8085"}
             - {name: SAGA_SWEEP_INTERVAL_SECONDS, value: "30"}
           readinessProbe:
             httpGet: {path: /readyz, port: 8083}
