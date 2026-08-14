@@ -35,6 +35,10 @@ spec:
             # while the API returned a perfectly correct URL. It goes through the gateway,
             # which strips /media before forwarding.
             - {name: PUBLIC_BASE_URL, value: "https://api.arcadia.aptcodegen.online/media"}
+            # Browser-facing MinIO origin. Public covers are stored under this host so
+            # the storefront can put them in `<img src>` without going through Next.js
+            # or the media-service download route.
+            - {name: S3_PUBLIC_BASE_URL, value: "https://minio.arcadia.aptcodegen.online"}
             - {name: STORAGE_SOFT_LIMIT_BYTES, value: "5368709120"}
             - {name: OWNER_QUOTA_BYTES, value: "1073741824"}
           readinessProbe:

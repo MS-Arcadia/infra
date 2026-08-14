@@ -381,6 +381,7 @@ services:
       STORAGE_ROOT: /var/lib/arcadia/media
       # Must be reachable by a browser following the URLs, not by the Docker network.
       PUBLIC_BASE_URL: http://localhost:${MEDIA_HTTP_PORT:-8084}
+      S3_PUBLIC_BASE_URL: http://localhost:9000
       # Small on purpose for a laptop: the volume shares the host disk with Postgres, and
       # filling it would take the database down with it. Raise both for a real deployment.
       STORAGE_SOFT_LIMIT_BYTES: ${MEDIA_STORAGE_SOFT_LIMIT_BYTES:-5368709120}

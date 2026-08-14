@@ -27,11 +27,28 @@ echo "ensuring bucket $BUCKET"
 # exit code right, and the exit code is what `set -e` reads.
 mc mb --ignore-existing "$ALIAS/$BUCKET"
 
-# Private, explicitly. MinIO's default is already private, but "the objects are not public"
-# is exactly the kind of assumption worth writing down: an unreleased game build reachable by
-# URL is the one leak on this platform that cannot be undone. Downloads are authorised by the
-# media service and handed out as short-lived signed URLs; nothing here is world-readable.
-mc anonymous set none "$ALIAS/$BUCKET" >/dev/null
+# Private by default, then opened for anonymous *download* of public art.
+# GetObject only — ListBucket stays denied — so a game build is still unguessable
+# without its object key. Storefront covers are fetched by the browser from this
+# host (`minio.arcadia.aptcodegen.online`) rather than through media-service.
+mc anonymous set download "$ALIAS/$BUCKET" >/dev/null
+
+# Browser `<img>` tags do not need CORS, but canvas / fetch do. Locked to the
+# storefront origins rather than `*`.
+cat >/tmp/cors.json <<CORS
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": ["https://arcadia.aptcodegen.online", "http://localhost:3000"],
+      "AllowedMethods": ["GET", "HEAD"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"],
+      "MaxAgeSeconds": 3600
+    }
+  ]
+}
+CORS
+mc cors set "$ALIAS/$BUCKET" /tmp/cors.json >/dev/null
 
 echo "ensuring the $POLICY policy"
 cat >/tmp/policy.json <<JSON
@@ -113,6 +130,6 @@ esac
 
 echo
 echo "minio ready:"
-echo "  bucket          $BUCKET (private)"
+echo "  bucket          $BUCKET (anonymous GetObject)"
 echo "  media user      $MEDIA_S3_ACCESS_KEY  ->  $POLICY"
 echo "  console         http://localhost:9001  (log in as the root user)"

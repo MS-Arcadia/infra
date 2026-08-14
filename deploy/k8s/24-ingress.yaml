@@ -87,3 +87,27 @@ spec:
               service:
                 name: grafana
                 port: {number: 3000}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: arcadia-minio
+  namespace: arcadia
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-dns-cloudflare
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - minio.arcadia.aptcodegen.online
+      secretName: arcadia-minio-tls
+  rules:
+    - host: minio.arcadia.aptcodegen.online
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio
+                port: {number: 9000}
