@@ -33,11 +33,11 @@ spec:
             # Which space the content half ranks in — `sparse` is genre/tag cosine and needs nothing
             # behind it, `dense` is semantic and needs a real embedding endpoint. Both vectors are
             # ingested either way, so flipping this is a rollout, not a migration.
-            - {name: SCORING_BACKEND, value: sparse}
+            - {name: SCORING_BACKEND, value: dense}
             # `hashing` is the in-process fallback; `huggingface` needs EMBEDDING_ENDPOINT alongside it or
             # the pod refuses to start. The keys are optional so the deployment still comes up against a
             # secret created before they existed.
-            - {name: EMBEDDING_BACKEND, value: hashing}
+            - {name: EMBEDDING_BACKEND, value: huggingface}
             - {name: EMBEDDING_ENDPOINT, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: EMBEDDING_ENDPOINT, optional: true}}}
             - {name: EMBEDDING_API_KEY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: EMBEDDING_API_KEY, optional: true}}}
             # Baked into the `vector(n)` column: changing it needs a migration and a re-embedding.
@@ -45,23 +45,37 @@ spec:
             - {name: EMBEDDING_PREFIX, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: EMBEDDING_PREFIX, optional: true}}}
             # Writes the `reasons` on each suggestion, one call per user per sweep and never on the read
             # path. `none` leaves the field empty rather than failing a list.
-            - {name: EXPLANATION_BACKEND, value: none}
+            - {name: EXPLANATION_BACKEND, value: openai}
             - {name: EXPLANATION_BASE_URL, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: EXPLANATION_BASE_URL, optional: true}}}
             - {name: EXPLANATION_API_KEY, valueFrom: {secretKeyRef: {name: arcadia-secrets, key: EXPLANATION_API_KEY, optional: true}}}
             # Paired with https://api.llm7.io/v1 in the secret; it honours response_format: json_object,
             # which is how the reasons come back parseable.
             - {name: EXPLANATION_MODEL, value: gemini-3.1-flash-lite}
+          # Startup is slower than the other services': migrations, four Kafka consumer
+          # groups joining, and — with the dense backend on — the embedding client being
+          # made ready before the port opens. A fixed initialDelay for that was killed by
+          # its own liveness probe four times before it settled, each restart paying the
+          # whole cost again. A startupProbe gives it up to two minutes to answer once,
+          # and only then do the steady-state probes begin.
+          startupProbe:
+            httpGet: {path: /livez, port: 8093}
+            periodSeconds: 5
+            failureThreshold: 24
           readinessProbe:
             httpGet: {path: /readyz, port: 8093}
-            initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 3
           livenessProbe:
             httpGet: {path: /livez, port: 8093}
-            initialDelaySeconds: 15
             periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 5
           resources:
-            limits: {memory: 160Mi, cpu: 150m}
-            requests: {memory: 96Mi, cpu: 50m}
+            # Room for a 1024-dimension vector per game and the batch of 32 being embedded.
+            # The sparse backend fitted in 160Mi; the dense one sat at 98Mi idle, which is
+            # too close to it to survive a sweep.
+            limits: {memory: 384Mi, cpu: 400m}
+            requests: {memory: 128Mi, cpu: 50m}
 ---
 apiVersion: v1
 kind: Service
