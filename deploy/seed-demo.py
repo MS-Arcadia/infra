@@ -42,6 +42,7 @@ import struct
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import zlib
@@ -54,7 +55,7 @@ ADMIN_PASSWORD = os.environ.get("SUPER_ADMIN_PASSWORD", "")
 # One password for every seeded account, so a demo can be driven without a password list.
 DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "Demo-Arcadia-2026!")
 
-TIMEOUT = 30
+TIMEOUT = 60
 
 
 class ApiError(RuntimeError):
@@ -131,12 +132,22 @@ def upload(path: str, *, token: str, filename: str, content: bytes, content_type
         raise ApiError("POST", path, error.code, error.read()[:300].decode(errors="replace")) from None
 
 
+COMMONS_FILE = "https://commons.wikimedia.org/wiki/Special:FilePath/{name}?width=1600"
+COMMONS_UA = "ArcadiaDemoSeeder/1.0 (https://arcadia.aptcodegen.online; course demo covers)"
+
+
+def download_bytes(url: str) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": COMMONS_UA})
+    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        return response.read()
+
+
 def cover_png(width: int, height: int, top: tuple[int, int, int], bottom: tuple[int, int, int]) -> bytes:
     """A vertical gradient, as a real PNG.
 
-    Generated rather than committed: five binary files in the repository to make a demo look
-    populated is a poor trade, and media-service sniffs the leading bytes of an upload, so
-    this has to be a genuine PNG rather than something merely named .png.
+    Fallback only: covers are photographs from Wikimedia Commons. Generated rather than
+    committed, and media-service sniffs the leading bytes of an upload, so this has to be
+    a genuine PNG rather than something merely named .png.
     """
     rows = bytearray()
     for y in range(height):
@@ -160,6 +171,29 @@ def cover_png(width: int, height: int, top: tuple[int, int, int], bottom: tuple[
         + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
         + chunk(b"IEND", b"")
     )
+
+
+def cover_bytes(spec: dict) -> tuple[bytes, str, str]:
+    """Photograph for this game, or a gradient if Commons is unreachable.
+
+    Returns (bytes, content_type, filename). Wikimedia Commons is used rather than a
+    Google scrape: the files are real photographs with a licence that allows this, and
+    the seeder stays dependency-free.
+    """
+    name = spec.get("commons")
+    if name:
+        url = COMMONS_FILE.format(name=urllib.parse.quote(name))
+        try:
+            data = download_bytes(url)
+        except (urllib.error.URLError, TimeoutError, ValueError) as error:
+            print(f"  ! {spec['title']}: cover download failed ({error})")
+        else:
+            if data[:3] == b"\xff\xd8\xff":
+                return data, "image/jpeg", "cover.jpg"
+            if data[:8] == b"\x89PNG\r\n\x1a\n":
+                return data, "image/png", "cover.png"
+            print(f"  ! {spec['title']}: Commons did not return an image")
+    return cover_png(960, 540, *spec["colours"]), "image/png", "cover.png"
 
 
 def login(email: str, password: str) -> str:
@@ -239,6 +273,7 @@ GAMES = [
         "price": 890_000,
         "suggested": 950_000,
         "colours": ((124, 58, 237), (236, 72, 153)),
+        "commons": "Night city traffic (Unsplash).jpg",
     },
     {
         "title": "Paper Kingdoms",
@@ -251,6 +286,7 @@ GAMES = [
         "price": 1_240_000,
         "suggested": 1_300_000,
         "colours": ((251, 146, 60), (244, 63, 94)),
+        "commons": "Cranes made by Origami paper.jpg",
     },
     {
         "title": "Deep Signal",
@@ -263,6 +299,7 @@ GAMES = [
         "price": 1_580_000,
         "suggested": 1_650_000,
         "colours": ((14, 165, 233), (30, 41, 59)),
+        "commons": "CSIRO ScienceImage 4350 CSIROs Parkes Radio Telescope with moon in the background.jpg",
     },
     {
         "title": "Garden of Forking Paths",
@@ -275,6 +312,7 @@ GAMES = [
         "price": 620_000,
         "suggested": 700_000,
         "colours": ((34, 197, 94), (16, 185, 129)),
+        "commons": "Hampton Court hedge maze.jpg",
     },
     {
         "title": "Ironworks",
@@ -287,6 +325,7 @@ GAMES = [
         "price": 1_890_000,
         "suggested": 1_950_000,
         "colours": ((99, 102, 241), (14, 116, 144)),
+        "commons": "DSC03739 Blast Furnace 1 at Night, voestalpine Donawitz, 2026-02.jpg",
     },
     {
         "title": "Hollow Signal",
@@ -299,6 +338,7 @@ GAMES = [
         "price": 720_000,
         "suggested": 780_000,
         "colours": ((56, 189, 248), (15, 23, 42)),
+        "commons": "Saturn during Equinox.jpg",
     },
     {
         "title": "Lantern Way",
@@ -310,6 +350,7 @@ GAMES = [
         "price": 180_000,
         "suggested": 220_000,
         "colours": ((251, 191, 36), (120, 53, 15)),
+        "commons": "Boats with lanterns on the Thu Bon river IMG 3864.jpg",
     },
     {
         "title": "Vault of Echoes",
@@ -321,6 +362,7 @@ GAMES = [
         "price": 620_000,
         "suggested": 680_000,
         "colours": ((168, 85, 247), (76, 29, 149)),
+        "commons": "Antelope Canyon.jpg",
     },
     {
         "title": "Starforge Tactics",
@@ -333,6 +375,7 @@ GAMES = [
         "price": 1_100_000,
         "suggested": 1_180_000,
         "colours": ((14, 165, 233), (2, 44, 84)),
+        "commons": "Carina Nebula.jpg",
     },
 ]
 
@@ -359,12 +402,13 @@ def publish_game(spec: dict, developer: str, support: str) -> str:
 
     # Cover art first: it has to be attached before the game is submitted, because a game in
     # review is no longer the developer's to edit.
+    body, content_type, filename = cover_bytes(spec)
     art = upload(
         "/media/v1/media",
         token=developer,
-        filename=f"{game_id}.png",
-        content=cover_png(960, 540, *spec["colours"]),
-        content_type="image/png",
+        filename=filename,
+        content=body,
+        content_type=content_type,
         fields={"kind": "IMAGE", "reference_id": game_id},
     )
     call(
@@ -387,6 +431,32 @@ def publish_game(spec: dict, developer: str, support: str) -> str:
     for method, path, payload, token in steps:
         call(method, path, token=token, body=payload)
     return game_id
+
+
+def replace_cover(game: dict, spec: dict, developer: str) -> None:
+    """Swap the teaser on an already-published game for a real photograph.
+
+    The seeder leaves published titles alone, so a second run would otherwise keep the
+    original gradient forever. A published game can still have its media replaced.
+    """
+    body, content_type, filename = cover_bytes(spec)
+    art = upload(
+        "/media/v1/media",
+        token=developer,
+        filename=filename,
+        content=body,
+        content_type=content_type,
+        fields={"kind": "IMAGE", "reference_id": game["id"]},
+    )
+    for item in game.get("media") or []:
+        if item.get("kind") == "TEASER":
+            call("DELETE", f"/catalog/v1/games/{game['id']}/media/{item['id']}", token=developer)
+    call(
+        "POST",
+        f"/catalog/v1/games/{game['id']}/media",
+        token=developer,
+        body={"kind": "TEASER", "media_ref": art["url"]},
+    )
 
 
 def multipart_fields(path: str, *, token: str, fields: dict[str, str]) -> dict:
@@ -728,6 +798,19 @@ def main() -> int:
         publish_game(spec, tokens["DEVELOPER"], tokens["SUPPORT"])
         print(f"  + {spec['title']}")
         added += 1
+
+    catalogue = call("GET", "/catalog/v1/games?limit=100")
+    by_title = {g["title"]: g for g in catalogue["items"]}  # type: ignore[index,union-attr]
+    specs = {spec["title"]: spec for spec in GAMES}
+    for title, game in by_title.items():
+        spec = specs.get(title)
+        if spec is None:
+            continue
+        try:
+            replace_cover(game, spec, tokens["DEVELOPER"])
+            print(f"  cover {title}")
+        except ApiError as error:
+            print(f"  ! could not replace the cover for {title}: {error}")
 
     by_title = add_activity(tokens, ids, extras)
 
