@@ -46,7 +46,7 @@ def a_published_game(developer, support) -> str:
 
     game_id = a_priced_game(developer, support)
     published = a.call(
-        "POST", f"{a.CATALOG}/v1/games/{game_id}/publish", user=developer, role="DEVELOPER"
+        "POST", f"{a.CATALOG}/v1/games/{game_id}/publish", user=support, role="SUPPORT"
     )
     assert published.status in (200, 201), published
     return game_id

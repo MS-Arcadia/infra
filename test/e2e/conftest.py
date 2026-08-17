@@ -216,8 +216,8 @@ def game(developer, support) -> dict:
         ("POST", f"/v1/games/{game_id}/review/approve", {"note": "looks good"}, "SUPPORT", support),
         ("POST", f"/v1/games/{game_id}/suggest-price", {"amount_minor": SUGGESTED_PRICE},
          "SUPPORT", support),
-        ("POST", f"/v1/games/{game_id}/price", {"amount_minor": PRICE}, "DEVELOPER", developer),
-        ("POST", f"/v1/games/{game_id}/publish", None, "DEVELOPER", developer),
+        ("POST", f"/v1/games/{game_id}/price/reject", {"amount_minor": PRICE}, "DEVELOPER", developer),
+        ("POST", f"/v1/games/{game_id}/publish", None, "SUPPORT", support),
     ]
     for method, path, body, role, user in workflow:
         step = a.call(method, f"{a.CATALOG}{path}", user=user, role=role, body=body)

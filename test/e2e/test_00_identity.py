@@ -333,9 +333,11 @@ def test_a_purchase_shows_up_in_the_profile_library(developer, support, administ
         ("POST", f"{a.CATALOG}/v1/games/{game_id}/submit", dev, None),
         ("POST", f"{a.CATALOG}/v1/games/{game_id}/review/start", reviewer, None),
         ("POST", f"{a.CATALOG}/v1/games/{game_id}/review/approve", reviewer, {"note": "ok"}),
-        ("POST", f"{a.CATALOG}/v1/games/{game_id}/price", dev,
+        ("POST", f"{a.CATALOG}/v1/games/{game_id}/suggest-price", reviewer,
          {"amount_minor": 1_000_000, "currency": "IRR"}),
-        ("POST", f"{a.CATALOG}/v1/games/{game_id}/publish", dev, None),
+        ("POST", f"{a.CATALOG}/v1/games/{game_id}/price/reject", dev,
+         {"amount_minor": 1_000_000, "currency": "IRR"}),
+        ("POST", f"{a.CATALOG}/v1/games/{game_id}/publish", reviewer, None),
     )
     for method, url, token, body in steps:
         response = a.call(method, url, bearer=token, key=str(uuid.uuid4()), body=body)

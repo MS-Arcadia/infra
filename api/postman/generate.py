@@ -230,13 +230,23 @@ def approval_chain(
             f"{{{{catalogBase}}}}/v1/games/{{{{{var}}}}}/review/approve",
             token="supportToken",
             body={"note": "Approved."},
-            description="Approved is not published — the developer still decides when.",
+            description="Approved is not published — the developer answers the price next.",
             tests=ok(200),
         ),
         req(
-            "Price it",
+            "Suggest a price",
             "POST",
-            f"{{{{catalogBase}}}}/v1/games/{{{{{var}}}}}/price",
+            f"{{{{catalogBase}}}}/v1/games/{{{{{var}}}}}/suggest-price",
+            token="supportToken",
+            idempotent=True,
+            body={"amount_minor": price_minor, "currency": "IRR"},
+            description="Staff propose a price. The developer accepts or counters.",
+            tests=ok(200),
+        ),
+        req(
+            "Answer the price",
+            "POST",
+            f"{{{{catalogBase}}}}/v1/games/{{{{{var}}}}}/price/reject",
             token="developerToken",
             idempotent=True,
             body={"amount_minor": price_minor, "currency": "IRR"},
@@ -250,8 +260,8 @@ def approval_chain(
                 "Publish it",
                 "POST",
                 f"{{{{catalogBase}}}}/v1/games/{{{{{var}}}}}/publish",
-                token="developerToken",
-                description="On sale.",
+                token="supportToken",
+                description="On sale, after staff confirm the answered price.",
                 tests=ok(200),
             )
         )
@@ -471,8 +481,8 @@ publishing = folder(
             token="supportToken",
             body={"note": "Content policy check passed."},
             description=(
-                "Approved is not published. The developer still has to set a price and press "
-                "publish — approval is permission, not a release."
+                "Approved is not published. Support has suggested a price; the developer "
+                "accepts or counters, then staff publish."
             ),
             tests=ok(200),
         ),
@@ -484,25 +494,31 @@ publishing = folder(
             idempotent=True,
             body={"amount_minor": 900000, "currency": "IRR"},
             description=(
-                "Requirement 1.3's pricing conversation, and it runs the direction that is easy "
-                "to get backwards: **staff suggest, the developer decides.**\n\n"
-                "Advisory only — it does not set anything. A reviewer who could price somebody "
-                "else's game would be taking a business decision on their behalf. Sent with the "
-                "support token; a developer calling this on their own game gets a 403."
+                "Staff propose a price. The developer then accepts it or counters with "
+                "another. A developer calling this on their own game gets a 403."
             ),
             tests=ok(200),
         ),
         req(
-            "Set the final price",
+            "Accept the suggested price",
             "POST",
-            "{{catalogBase}}/v1/games/{{gameId}}/price",
+            "{{catalogBase}}/v1/games/{{gameId}}/price/accept",
+            token="developerToken",
+            description=(
+                "Takes Support's suggestion as the sale price. Staff still have to publish."
+            ),
+            tests=ok(200),
+        ),
+        req(
+            "Or reject it with a different price",
+            "POST",
+            "{{catalogBase}}/v1/games/{{gameId}}/price/reject",
             token="developerToken",
             idempotent=True,
             body={"amount_minor": 1000000, "currency": "IRR"},
             description=(
                 "10,000 IRR. Integer minor units and a string, like every amount on the "
-                "platform.\n\n"
-                "Only possible once the game is approved, and only by its developer."
+                "platform. Use this instead of Accept when the developer wants a different price."
             ),
             tests=ok(200),
         ),
@@ -510,10 +526,10 @@ publishing = folder(
             "Publish",
             "POST",
             "{{catalogBase}}/v1/games/{{gameId}}/publish",
-            token="developerToken",
+            token="supportToken",
             description=(
-                "Now it is for sale. Publishing emits `GamePublished`, which is what the "
-                "recommendation and notification services listen for."
+                "Staff confirm the answered price. Publishing emits `GamePublished`, which is "
+                "what the recommendation and notification services listen for."
             ),
             tests=ok(200),
         ),

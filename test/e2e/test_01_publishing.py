@@ -82,18 +82,17 @@ def test_a_rejected_game_can_be_appealed(developer, support):
     assert response.body["reviews"][0]["appealed"] is True
 
 
-def test_the_developer_sets_the_price_not_support(game):
-    """Requirement 1.3: Support proposes, the developer decides."""
+def test_the_developer_answers_the_suggested_price(game):
+    """Support proposes; the developer accepts or counters. Staff then publish."""
     assert game["suggested_price"]["amount_minor"] == str(SUGGESTED_PRICE)
     assert game["final_price"]["amount_minor"] == str(PRICE)
     assert game["state"] == "PUBLISHED"
 
 
-def test_support_cannot_publish(game, support):
-    """§6.4's diagram gives publishing to Support; requirement 1.3 gives it to the
-    developer, and the requirements were finalised later."""
+def test_the_developer_cannot_publish(game, developer):
+    """Staff confirm the answered price. The developer is refused here."""
     response = a.call(
-        "POST", f"{a.CATALOG}/v1/games/{game['id']}/publish", user=support, role="SUPPORT"
+        "POST", f"{a.CATALOG}/v1/games/{game['id']}/publish", user=developer, role="DEVELOPER"
     )
     assert response.status == 403
 

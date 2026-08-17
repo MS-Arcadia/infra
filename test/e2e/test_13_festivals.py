@@ -81,9 +81,9 @@ def published_game(developer: str, support: str, *, title: str = "Nebula Run") -
         ("POST", f"/v1/games/{game_id}/review/approve", {"note": "ok"}, "SUPPORT", support),
         ("POST", f"/v1/games/{game_id}/suggest-price",
          {"amount_minor": 400_000}, "SUPPORT", support),
-        ("POST", f"/v1/games/{game_id}/price",
+        ("POST", f"/v1/games/{game_id}/price/reject",
          {"amount_minor": 800_000}, "DEVELOPER", developer),
-        ("POST", f"/v1/games/{game_id}/publish", None, "DEVELOPER", developer),
+        ("POST", f"/v1/games/{game_id}/publish", None, "SUPPORT", support),
     ]
     for method, path, body, role, user in workflow:
         step = cat(method, path, user=user, role=role, body=body)

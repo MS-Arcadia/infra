@@ -30,7 +30,8 @@ def a_priced_game(developer: str, support: str) -> str:
         ("POST", f"/v1/games/{game_id}/submit", None, "DEVELOPER", developer),
         ("POST", f"/v1/games/{game_id}/review/start", None, "SUPPORT", support),
         ("POST", f"/v1/games/{game_id}/review/approve", {"note": "fine"}, "SUPPORT", support),
-        ("POST", f"/v1/games/{game_id}/price", {"amount_minor": PRICE}, "DEVELOPER", developer),
+        ("POST", f"/v1/games/{game_id}/suggest-price", {"amount_minor": PRICE}, "SUPPORT", support),
+        ("POST", f"/v1/games/{game_id}/price/reject", {"amount_minor": PRICE}, "DEVELOPER", developer),
     ]:
         step = a.call(method, f"{a.CATALOG}{path}", user=user, role=role, body=body)
         assert step.status in (200, 201), (path, step)

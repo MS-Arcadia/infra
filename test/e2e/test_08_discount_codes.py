@@ -87,7 +87,7 @@ def test_a_purchase_with_a_code_charges_less_and_pays_the_developer_in_full(
     from test_07_preorders import a_priced_game
 
     game_id = a_priced_game(developer, support)
-    a.call("POST", f"{a.CATALOG}/v1/games/{game_id}/publish", user=developer, role="DEVELOPER")
+    a.call("POST", f"{a.CATALOG}/v1/games/{game_id}/publish", user=support, role="SUPPORT")
 
     placed = a.call(
         "POST", f"{a.ORDER}/v1/orders", user=buyer, key=f"e2e-discount-{game_id}",
@@ -129,7 +129,7 @@ def test_a_nonexistent_code_is_refused_before_anything_is_charged(
     from test_07_preorders import a_priced_game
 
     game_id = a_priced_game(developer, support)
-    a.call("POST", f"{a.CATALOG}/v1/games/{game_id}/publish", user=developer, role="DEVELOPER")
+    a.call("POST", f"{a.CATALOG}/v1/games/{game_id}/publish", user=support, role="SUPPORT")
 
     before = balance(funded_buyer)
     response = a.call(
@@ -159,7 +159,7 @@ def test_the_code_is_recorded_on_the_order(developer, support, admin, code, sett
     from test_07_preorders import a_priced_game
 
     game_id = a_priced_game(developer, support)
-    a.call("POST", f"{a.CATALOG}/v1/games/{game_id}/publish", user=developer, role="DEVELOPER")
+    a.call("POST", f"{a.CATALOG}/v1/games/{game_id}/publish", user=support, role="SUPPORT")
 
     placed = a.call(
         "POST", f"{a.ORDER}/v1/orders", user=buyer, key=f"e2e-record-{game_id}",

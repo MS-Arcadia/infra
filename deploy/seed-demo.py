@@ -425,8 +425,8 @@ def publish_game(spec: dict, developer: str, support: str) -> str:
         ("POST", f"/catalog/v1/games/{game_id}/review/start", None, support),
         ("POST", f"/catalog/v1/games/{game_id}/review/approve", {"note": "Plays well, ships clean."}, support),
         ("POST", f"/catalog/v1/games/{game_id}/suggest-price", {"amount_minor": spec["suggested"]}, support),
-        ("POST", f"/catalog/v1/games/{game_id}/price", {"amount_minor": spec["price"]}, developer),
-        ("POST", f"/catalog/v1/games/{game_id}/publish", None, developer),
+        ("POST", f"/catalog/v1/games/{game_id}/price/reject", {"amount_minor": spec["price"]}, developer),
+        ("POST", f"/catalog/v1/games/{game_id}/publish", None, support),
     ]
     for method, path, payload, token in steps:
         call(method, path, token=token, body=payload)

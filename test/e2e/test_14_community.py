@@ -92,8 +92,8 @@ def publish_game(developer: str, support: str, title: str) -> str:
         ("POST", f"/v1/games/{game_id}/review/start", None, "SUPPORT", support),
         ("POST", f"/v1/games/{game_id}/review/approve", {"note": "looks good"}, "SUPPORT", support),
         ("POST", f"/v1/games/{game_id}/suggest-price", {"amount_minor": 500_000}, "SUPPORT", support),
-        ("POST", f"/v1/games/{game_id}/price", {"amount_minor": 1_000_000}, "DEVELOPER", developer),
-        ("POST", f"/v1/games/{game_id}/publish", None, "DEVELOPER", developer),
+        ("POST", f"/v1/games/{game_id}/price/reject", {"amount_minor": 1_000_000}, "DEVELOPER", developer),
+        ("POST", f"/v1/games/{game_id}/publish", None, "SUPPORT", support),
     ]
     for method, path, body, role, user in workflow:
         step = a.call(method, f"{a.CATALOG}{path}", user=user, role=role, body=body)
