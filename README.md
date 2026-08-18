@@ -1,17 +1,69 @@
 # Arcadia — Infrastructure
 
-Deployment files for the [Arcadia](../PHASE01/README.md) platform. **This repository
-contains no source code and compiles nothing.** It runs images that the service
+Deployment files for the [Arcadia](https://github.com/MS-Arcadia/PHASE02) platform. **This
+repository contains no source code and compiles nothing.** It runs images that the service
 repositories build.
+
+Two deployment targets, from the same set of service images:
+
+- **Kubernetes** — the live platform, in the `arcadia` namespace of a k3s cluster.
+- **Docker Compose** — the whole platform on one machine, for development.
 
 ```
 infra/
 ├── deploy/
+│   ├── k8s/            the live platform: 27 manifests + apply.sh
+│   │   └── observability/  Prometheus, Alertmanager, Loki, Alloy configs
 │   ├── compose/        the local platform
 │   ├── postgres/init/  one database and role per service
-│   └── observability/  Prometheus + Grafana (opt-in)
-└── docs/runbooks/
+│   ├── observability/  Grafana dashboards and alert rules (shared by both targets)
+│   └── seed-demo.py    demo content, driven through the public gateway
+└── test/e2e/           123 checks against a running platform
 ```
+
+## The live platform
+
+| | |
+|---|---|
+| Storefront | `https://arcadia.aptcodegen.online` |
+| API gateway | `https://api.arcadia.aptcodegen.online` |
+| Grafana | `https://grafana.arcadia.aptcodegen.online` |
+| Object storage | `https://minio.arcadia.aptcodegen.online` |
+
+```bash
+export KUBECONFIG=~/.kube/config.ahmz
+
+./deploy/k8s/apply.sh --dry-run      # print what would change
+./deploy/k8s/apply.sh                # namespace, secret, configmaps, manifests
+./deploy/k8s/apply.sh --config-only  # refresh configmaps only
+./deploy/k8s/apply.sh --restart      # roll every deployment
+```
+
+`apply.sh` is idempotent and refuses to run if `.env` still holds placeholder values.
+Manifests are numbered so filename order is apply order: stateful backing services first
+(`01`–`04`), domain services (`10`–`21`, `25`), edge (`22`–`24`), observability (`26`–`28`,
+`33`–`34`), RBAC (`90`).
+
+Each service repository deploys itself: its CI pushes an image to `ghcr.io` and runs
+`kubectl set image` followed by `rollout status`. This repository owns the *shape* of the
+deployment, not the act of deploying.
+
+### Seeding a demo
+
+```bash
+export ARCADIA_API=https://api.arcadia.aptcodegen.online
+eval $(kubectl -n arcadia get secret arcadia-secrets -o json | python3 -c "
+import sys,json,base64
+d=json.load(sys.stdin)['data']
+for k in ('SUPER_ADMIN_EMAIL','SUPER_ADMIN_PASSWORD'):
+    print(f'export {k}={base64.b64decode(d[k]).decode()}')")
+
+python3 deploy/seed-demo.py
+```
+
+Idempotent, and it drives the **public gateway** with real accounts and real tokens rather
+than writing rows — so a run that finishes is evidence the whole workflow works on the
+deployment it just ran against.
 
 ## Getting started
 
@@ -21,7 +73,7 @@ Build the images first, in the service repositories, then start the platform:
 make images      # calls each service's own `make docker`
 make up
 make wait        # blocks until every service reports ready
-make e2e         # 75 checks against the running platform, ~20s
+make e2e         # 123 checks against the running platform, ~20s
 ```
 
 Or if the images already exist, just `make up`. `make help` lists the rest.
@@ -125,6 +177,83 @@ container that only forwards.
 
 ---
 
+## Cluster topology
+
+```mermaid
+graph TB
+    net(("Internet"))
+
+    subgraph ns["namespace: arcadia"]
+        subgraph edge["Ingress · Traefik + cert-manager"]
+            hosts["4 hosts, 4 certificates<br/>Let's Encrypt DNS-01"]
+        end
+        subgraph stateless["Deployments"]
+            fe["frontend"]
+            gw["api-gateway ×3"]
+            svc["12 domain services"]
+            obs["prometheus · grafana<br/>alertmanager · alloy"]
+        end
+        subgraph stateful["StatefulSets + PVCs"]
+            pg[("postgres<br/>pgvector/pg16")]
+            kf[("kafka · KRaft")]
+            rd[("redis")]
+            mn[("minio")]
+            lk[("loki")]
+        end
+    end
+
+    net --> hosts
+    hosts --> fe & gw & obs & mn
+    gw --> svc
+    svc --> pg & kf & rd & mn
+    obs --> lk
+
+    classDef e fill:#1168bd,stroke:#0b4884,color:#fff
+    classDef d fill:#2d7dd2,stroke:#1a5a9e,color:#fff
+    classDef st fill:#7d5ba6,stroke:#5c4179,color:#fff
+    class hosts e
+    class fe,gw,svc,obs d
+    class pg,kf,rd,mn,lk st
+```
+
+**PostgreSQL runs `pgvector/pgvector:pg16`, not the stock image.** recommendation-service
+stores embeddings in a `vector` column and its migration opens with `CREATE EXTENSION IF NOT
+EXISTS vector`. On the stock image that migration fails, the service logs it and carries on
+starting — so it reports healthy while every query against the new columns errors.
+
+Autoscaling: the gateway floors at 3 replicas and scales to 10; every domain service floors
+at 1 and scales to 4, all on 70% CPU. auth-profile-service gets a full CPU core rather than
+the usual 150m, because bcrypt at a fifth of a core takes longer than its liveness probe's
+timeout and the kubelet kills a pod doing exactly what it was asked to do.
+
+## Observability
+
+```mermaid
+graph LR
+    svcs["Services<br/>/metrics + JSON stdout"]
+    svcs --> prom["Prometheus<br/>scrape + cAdvisor"] --> am["Alertmanager"]
+    svcs --> alloy["Alloy<br/>reads pod logs via<br/>the Kubernetes API"] --> loki["Loki"]
+    prom --> graf["Grafana<br/>16 dashboards"]
+    loki --> graf
+
+    classDef o fill:#2d7dd2,stroke:#1a5a9e,color:#fff
+    class prom,am,alloy,loki,graf o
+```
+
+Dashboards are **generated**, not hand-drawn — `deploy/observability/generate-dashboards.py`
+emits one per service plus an overview, and `--check` runs in CI so a dashboard cannot drift
+from the metrics it queries.
+
+Alloy reads logs through the Kubernetes API rather than tailing `/var/log/pods` from a
+hostPath: no privileged container and no host mount on a shared cluster, and RBAC scoped to
+reading pods in one namespace. The trade is load on the API server, negligible at this size.
+
+Tracing one request across services, in Grafana → Explore → Loki:
+
+```logql
+{namespace="arcadia"} |= "<correlation-id>"
+```
+
 ## Why one PostgreSQL instance
 
 The architecture document specifies Database-per-Service. This runs **one PostgreSQL
@@ -187,12 +316,13 @@ silently creating a topic nobody reads.
 
 ## What is deliberately not here
 
-**No Kubernetes, no Helm, no Terraform.** The platform runs on plain Docker, so the only
-deployment description is the compose file. Manifests for a cluster nobody has go stale
-before they are ever applied; the compose file is exercised every time somebody runs
-`make up`, which is the only reason to trust a deployment description at all.
+**No Helm, no Terraform.** The manifests are plain YAML applied by a shell script. Helm
+would buy templating across environments, and there is one environment; Terraform would buy
+cluster provisioning, and the cluster is provisioned. Both would be machinery maintained for
+a second environment that does not exist.
 
-The things a cluster would have given us and how they are covered meanwhile:
+The Compose stack remains the development target, and the notes below describe how it covers
+what the cluster gives the live deployment:
 
 * **Health.** Both images declare a `HEALTHCHECK` that calls the binary's own
   `healthcheck` subcommand — the images are distroless, so there is no `curl` or shell
@@ -211,7 +341,7 @@ The things a cluster would have given us and how they are covered meanwhile:
 
 ## End-to-end tests
 
-`make e2e` runs 75 checks against the running platform: a game published, bought, refunded and
+`make e2e` runs 123 checks against the running platform: a game published, bought, refunded and
 gifted, the compensation path reached with a real race, files uploaded and served, and then the
 invariants no API exposes — every dead-letter topic empty, every outbox drained, every balance
 still equal to the sum of its ledger.
